@@ -3,6 +3,7 @@ import pytest
 
 from rba.nodes.verify import (
     filter_tech,
+    quote_relevant,
     is_impact_claim,
     numbers_in,
     quote_supported,
@@ -97,6 +98,32 @@ def test_empty_quote_is_rejected():
 def test_claim_with_no_evidence_at_all_is_rejected():
     c = Claim(id="x", repo="r", text="Did something impressive", evidence=[])
     assert verify_claim(c, EVIDENCE).status is ClaimStatus.REJECTED
+
+
+def test_a_real_but_unrelated_quote_is_rejected():
+    """From a live run: a tcell claim cited a goccy/go-json line. The quote was
+    genuine; it just supported nothing in the claim."""
+    evidence = '{"dependencies": ["github.com/goccy/go-json", "github.com/gin-gonic/gin"]}'
+    c = verify_claim(claim("The project uses the tcell library for terminal UI",
+                           path="go.mod", quote="github.com/goccy/go-json"), evidence)
+    assert c.status is ClaimStatus.REJECTED
+    assert "does not mention anything in the claim" in c.reason
+
+
+def test_a_matching_dependency_quote_is_accepted():
+    evidence = '{"dependencies": ["github.com/gin-gonic/gin"]}'
+    c = verify_claim(claim("Uses the gin web framework",
+                           path="go.mod", quote="github.com/gin-gonic/gin"), evidence)
+    assert c.status is ClaimStatus.VERIFIED
+
+
+@pytest.mark.parametrize("text,quote", [
+    ("Ships 34 tests that run in about 2 s", "34 tests, about 2 s"),
+    ("Implements delta-neutral hedging", "**Delta-Neutral Strategies**: Hedge"),
+    ("Three MongoDB collections are used", "stores three MongoDB collections"),
+])
+def test_paraphrase_is_not_punished(text, quote):
+    assert quote_relevant(text, quote, "README.md")
 
 
 def test_reformatted_quote_still_counts():

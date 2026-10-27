@@ -88,6 +88,15 @@ _IMPACT = re.compile(
     r"p9[59]|qps|rps)\b)")
 
 
+_STOPWORDS = {
+    "the", "and", "for", "with", "that", "this", "from", "using", "used", "use",
+    "repository", "repo", "project", "code", "author", "implements", "implemented",
+    "provides", "includes", "contains", "built", "build", "supports", "based",
+    "which", "into", "each", "across", "within", "their", "there", "when",
+    "library", "framework", "application", "app", "via", "run", "runs",
+}
+
+
 def normalise(text: str) -> str:
     return re.sub(r"[^a-z0-9.+#/_-]+", " ", text.lower())
 
@@ -133,6 +142,30 @@ def quote_supported(quote: str, evidence: str, min_overlap: float = 0.6) -> bool
     return hits / len(q) >= min_overlap
 
 
+def quote_relevant(claim_text: str, quote: str, path: str = "",
+                   min_shared: int = 1) -> bool:
+    """Does this quote support *this* claim, or merely exist?
+
+    Presence alone is not support. A live run produced the claim "uses the
+    tcell library for terminal UI" attributed to the quote
+    "github.com/goccy/go-json" — a real line from go.mod, and entirely
+    unrelated. Requiring shared content words catches that without punishing
+    honest paraphrase, since any real citation repeats at least one
+    distinctive term.
+    """
+    claim_words = {w for w in normalise(claim_text).split()
+                   if len(w) >= 3 and w not in _STOPWORDS}
+    quote_words = {w for w in normalise(f"{quote} {path}").split() if len(w) >= 3}
+    if not claim_words:
+        return True
+    # Dotted paths ("github.com/gin-gonic/gin") carry their parts as terms too.
+    for w in list(quote_words):
+        quote_words.update(re.split(r"[./_-]", w))
+    shared = {w for w in claim_words
+              if w in quote_words or any(w in q for q in quote_words if len(q) > 4)}
+    return len(shared) >= min_shared
+
+
 def verify_claim(claim: Claim, evidence: str) -> Claim:
     """Decide a single claim's status. Pure function, fully testable."""
     unsupported_numbers = [n for n in numbers_in(claim.text)
@@ -156,10 +189,17 @@ def verify_claim(claim: Claim, evidence: str) -> Claim:
         claim.reason = "no evidence supplied"
         return claim
 
-    good = [e for e in claim.evidence if quote_supported(e.quote, evidence)]
-    if not good:
+    present = [e for e in claim.evidence if quote_supported(e.quote, evidence)]
+    if not present:
         claim.status = ClaimStatus.REJECTED
         claim.reason = "every supporting quote is absent from the evidence"
+        return claim
+
+    good = [e for e in present if quote_relevant(claim.text, e.quote, e.path)]
+    if not good:
+        claim.status = ClaimStatus.REJECTED
+        claim.reason = ("supporting quote is real but does not mention anything "
+                        "in the claim")
         return claim
     claim.evidence = good
 
