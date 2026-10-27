@@ -42,7 +42,7 @@ def test_zero_size_is_not_treated_as_empty():
 def test_drop_empty_uses_files_and_commits():
     sigs = {}
     for name, files, commits in [("empty", 0, 0), ("one-commit", 5, 1), ("real", 20, 12)]:
-        s = RepoSignals(name)
+        s = RepoSignals(repo=name)
         s.file_count, s.commit_count = files, commits
         sigs[name] = s
     keep, drop = drop_empty([repo("empty"), repo("one-commit"), repo("real")], sigs,

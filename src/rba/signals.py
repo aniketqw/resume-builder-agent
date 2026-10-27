@@ -16,6 +16,8 @@ import asyncio
 import logging
 import re
 
+from pydantic import BaseModel, Field
+
 from .state import RepoRef
 
 log = logging.getLogger(__name__)
@@ -31,49 +33,33 @@ README_CANDIDATES = ("README.md", "README.rst", "README.txt", "readme.md", "READ
 ARCHIVE_PAT = re.compile(r"\.(zip|tar\.gz|pdf|pptx?|docx?|mp4|csv)$", re.I)
 
 
-class RepoSignals:
-    """Bounded, deterministic facts about one repo."""
+class RepoSignals(BaseModel):
+    """Bounded, deterministic facts about one repo.
 
-    __slots__ = (
-        "archive_files",
-        "author_commits",
-        "code_files",
-        "commit_count",
-        "dep_files",
-        "error",
-        "file_count",
-        "first_commit",
-        "has_ci",
-        "has_docs",
-        "has_tests",
-        "last_commit",
-        "notebook_files",
-        "readme_chars",
-        "readme_head",
-        "readme_path",
-        "repo",
-        "top_dirs",
-    )
+    A Pydantic model rather than a plain class because this lands in LangGraph
+    state, and the checkpointer serialises state with msgpack: a bare object
+    raises "Type is not msgpack serializable" the moment a run tries to
+    persist, which is exactly when you need the checkpoint.
+    """
 
-    def __init__(self, repo: str):
-        self.repo = repo
-        self.readme_head = ""
-        self.readme_chars = 0
-        self.readme_path = ""
-        self.file_count = 0
-        self.code_files = 0
-        self.notebook_files = 0
-        self.archive_files = 0
-        self.has_tests = False
-        self.has_ci = False
-        self.has_docs = False
-        self.dep_files: list[str] = []
-        self.commit_count = 0
-        self.author_commits = 0
-        self.first_commit = ""
-        self.last_commit = ""
-        self.top_dirs: list[str] = []
-        self.error = ""
+    repo: str
+    readme_head: str = ""
+    readme_chars: int = 0
+    readme_path: str = ""
+    file_count: int = 0
+    code_files: int = 0
+    notebook_files: int = 0
+    archive_files: int = 0
+    has_tests: bool = False
+    has_ci: bool = False
+    has_docs: bool = False
+    dep_files: list[str] = Field(default_factory=list)
+    commit_count: int = 0
+    author_commits: int = 0
+    first_commit: str = ""
+    last_commit: str = ""
+    top_dirs: list[str] = Field(default_factory=list)
+    error: str = ""
 
     def as_state(self, repo: RepoRef) -> dict:
         """The evidence blob handed to Jev. Facts only — no scoring, no adjectives."""
@@ -137,7 +123,7 @@ def classify_tree(paths: list[str], sig: RepoSignals) -> None:
 async def fetch_signals(backend, repo: RepoRef, owner: str,
                         readme_chars: int = 1200,
                         commit_sample: int = 30) -> RepoSignals:
-    sig = RepoSignals(repo.name)
+    sig = RepoSignals(repo=repo.name)
     try:
         tree_task = backend.get_tree(repo.name, repo.default_branch)
         commits_task = backend.list_commits(repo.name, commit_sample)

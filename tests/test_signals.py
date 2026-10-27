@@ -3,7 +3,7 @@ from rba.state import RepoRef
 
 
 def sig_for(paths):
-    s = RepoSignals("demo")
+    s = RepoSignals(repo="demo")
     classify_tree(paths, s)
     return s
 

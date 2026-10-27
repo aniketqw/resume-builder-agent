@@ -72,7 +72,7 @@ async def fetch_repo_facts(backend, repo: RepoRef, owner: str, config: Config,
             return_exceptions=True,
         )
         if isinstance(tree, list) and tree:
-            sig = RepoSignals(repo.name)
+            sig = RepoSignals(repo=repo.name)
             classify_tree(tree, sig)
             facts.file_count = sig.file_count
             facts.has_tests = sig.has_tests
