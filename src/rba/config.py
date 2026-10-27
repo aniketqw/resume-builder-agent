@@ -85,6 +85,25 @@ def secret(name: str, required: bool = True) -> str:
     return val
 
 
+def enable_tracing() -> str | None:
+    """Turn on LangSmith tracing if it is configured.
+
+    Returns the project name when tracing is active, else None. Tracing is a
+    diagnostic: a misconfigured LangSmith must never stop a run.
+    """
+    load_dotenv(PROJECT_ROOT / ".env", override=False)
+    if os.environ.get("LANGSMITH_TRACING", "").lower() not in ("1", "true", "yes"):
+        return None
+    if not os.environ.get("LANGSMITH_API_KEY"):
+        return None
+    project = os.environ.setdefault("LANGSMITH_PROJECT", "resume-builder-agent")
+    # LangChain still reads the LANGCHAIN_* names in places; mirror them.
+    os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
+    os.environ.setdefault("LANGCHAIN_PROJECT", project)
+    os.environ.setdefault("LANGCHAIN_API_KEY", os.environ["LANGSMITH_API_KEY"])
+    return project
+
+
 def missing_secrets() -> list[str]:
     load_dotenv(PROJECT_ROOT / ".env", override=False)
     return [k for k in REQUIRED_KEYS if not os.environ.get(k)]

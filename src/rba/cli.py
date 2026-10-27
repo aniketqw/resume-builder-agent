@@ -147,10 +147,10 @@ def run(
     from .graph import Runner, build_graph, make_checkpointer
 
     runner = Runner(cfg, contact=contact, review=review)
-    graph = build_graph(runner, make_checkpointer())
     cfg_arg = {"configurable": {"thread_id": thread}, "recursion_limit": 50}
 
     async def go():
+        graph = build_graph(runner, await make_checkpointer())
         try:
             result = await graph.ainvoke({"username": username}, cfg_arg)
             if "__interrupt__" in result:
@@ -182,9 +182,9 @@ def resume_run(
 
     cfg = Config.load()
     runner = Runner(cfg)
-    graph = build_graph(runner, make_checkpointer())
 
     async def go():
+        graph = build_graph(runner, await make_checkpointer())
         try:
             result = await graph.ainvoke(
                 Command(resume={"approved": approve, "note": note}),

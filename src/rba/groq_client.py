@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
@@ -23,7 +24,7 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from .cache import Cache
-from .config import Config, secret
+from .config import Config, enable_tracing, secret
 from .limiter import Limiter, estimate_tokens
 from .schema import response_format
 
@@ -36,6 +37,18 @@ MIN_MAX_TOKENS = 800
 
 # Models where langchain-groq / Groq honour strict constrained decoding.
 STRICT_CAPABLE = {"openai/gpt-oss-20b", "openai/gpt-oss-120b", "openai/gpt-oss-safeguard-20b"}
+
+
+def _make_tracer():
+    """A LangSmith client, or None when tracing is off or unavailable."""
+    if enable_tracing() is None:
+        return None
+    try:
+        from langsmith import Client
+
+        return Client()
+    except Exception:
+        return None
 
 
 class GroqError(RuntimeError):
@@ -87,6 +100,7 @@ class GroqClient:
         self.margin = self.config.get("groq.token_estimate_margin", 0.10)
         self._client = httpx.AsyncClient(timeout=180.0, transport=transport)
         self.usage_by_node: dict[str, Usage] = {}
+        self._tracer = _make_tracer()
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -210,6 +224,7 @@ class GroqClient:
             result = Result(content, model, usage, data)
             if cache_key and self.cache:
                 self.cache.put(cache_key, model, content)
+            self._trace(node, model, messages, result)
             return result
 
         raise last_exc or GroqError(f"exhausted {self.max_retries} attempts on {model}")
@@ -239,6 +254,24 @@ class GroqClient:
                                 "Return only valid JSON matching the schema."},
                 ]
         raise GroqError(f"schema validation failed after retry: {last}")
+
+    def _trace(self, node: str | None, model: str,
+               messages: list[dict[str, str]], result: Result) -> None:
+        if self._tracer is None:
+            return
+        try:
+            self._tracer.create_run(
+                name=node or "groq",
+                run_type="llm",
+                inputs={"messages": messages, "model": model},
+                outputs={"content": result.content,
+                         "usage": {"prompt": result.usage.prompt_tokens,
+                                   "completion": result.usage.completion_tokens,
+                                   "total": result.usage.total_tokens}},
+                project_name=os.environ.get("LANGSMITH_PROJECT"),
+            )
+        except Exception as exc:  # tracing must never break a run
+            log.debug("langsmith trace failed: %s", exc)
 
     def _record(self, node: str | None, usage: Usage) -> None:
         key = node or "unattributed"

@@ -15,7 +15,7 @@ import logging
 import time
 from pathlib import Path
 
-from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
@@ -165,9 +165,18 @@ def build_graph(runner: Runner, checkpointer=None):
     return g.compile(checkpointer=checkpointer)
 
 
-def make_checkpointer(path: str | Path | None = None):
-    import sqlite3
+async def make_checkpointer(path: str | Path | None = None) -> AsyncSqliteSaver:
+    """Durable checkpoints for an async graph.
+
+    It has to be the async saver: the sync ``SqliteSaver`` raises
+    NotImplementedError the moment ``ainvoke`` asks it for a checkpoint, and
+    the whole graph is async because every node does network I/O.
+    """
+    import aiosqlite
 
     p = Path(path or CHECKPOINT_PATH)
     p.parent.mkdir(parents=True, exist_ok=True)
-    return SqliteSaver(sqlite3.connect(str(p), check_same_thread=False))
+    conn = await aiosqlite.connect(str(p))
+    saver = AsyncSqliteSaver(conn)
+    await saver.setup()
+    return saver
