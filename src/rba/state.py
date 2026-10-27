@@ -152,6 +152,7 @@ class AgentState(TypedDict, total=False):
     signals: dict[str, Any]
     facts: Annotated[dict[str, RepoFacts], _merge_dicts]
     summaries: Annotated[dict[str, RepoSummary], _merge_dicts]
+    evidence_texts: Annotated[dict[str, str], _merge_dicts]
     claims: Annotated[list[Claim], operator.add]
     safety: Annotated[list[SafetyFinding], operator.add]
     scores: dict[str, RoleScore]

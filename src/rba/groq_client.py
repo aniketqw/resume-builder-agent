@@ -169,7 +169,19 @@ class GroqClient:
                 continue
             if resp.status_code >= 400:
                 bucket.reconcile(est, 0, headers)
-                raise GroqError(f"{resp.status_code}: {resp.text[:500]}")
+                body_text = resp.text
+                # Strict-schema generation that runs out of completion budget
+                # comes back as a 400, not a truncated 200. Retrying with a
+                # larger budget is the documented fix, so do that rather than
+                # surfacing it as a hard failure.
+                if ("json_validate_failed" in body_text
+                        or "max completion tokens reached" in body_text):
+                    if body["max_tokens"] < 8192:
+                        body["max_tokens"] = min(int(body["max_tokens"] * 2), 8192)
+                        log.info("schema truncated on %s; retrying with max_tokens=%d",
+                                 model, body["max_tokens"])
+                        continue
+                raise GroqError(f"{resp.status_code}: {body_text[:500]}")
 
             data = resp.json()
             u = data.get("usage", {}) or {}

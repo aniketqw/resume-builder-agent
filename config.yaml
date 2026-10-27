@@ -16,7 +16,9 @@ groq:
   # an EMPTY `content` if max_tokens is small. Both settings below are required.
   defaults:
     reasoning_effort: low
-    max_tokens: 1200
+    # Summaries with several evidence-linked claims need real room: at 1200 a
+    # live run hit "max completion tokens reached" and lost a whole repo.
+    max_tokens: 2500
     temperature: 0
   # Stop cleanly before hitting a hard daily wall.
   daily_stop_fraction: 0.9
@@ -68,6 +70,11 @@ github:
     readme_max_chars: 6000
     max_tree_files: 120
     max_commits: 30
+
+summarize:
+  # ~4 chars per token. 7000 chars keeps one summarization call near 2k input
+  # tokens; measured cost of a real one was 2,074 total tokens.
+  max_evidence_chars: 7000
 
 report:
   out_dir: out
