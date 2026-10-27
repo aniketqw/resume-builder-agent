@@ -1,11 +1,13 @@
 """The anti-invention tests. If these pass, a fabricated number cannot reach a resume."""
+import json
+
 import pytest
 
 from rba.nodes.verify import (
     filter_tech,
-    quote_relevant,
     is_impact_claim,
     numbers_in,
+    quote_relevant,
     quote_supported,
     verify_claim,
     verify_claims,
@@ -32,7 +34,7 @@ def self_evidenced(text):
     Lets a test exercise one rule (numbers, impact language) without the quote
     presence and relevance checks firing first on an unrelated fixture quote.
     """
-    evidence = '{"readme": {"path": "README.md", "text": "%s"}}' % text
+    evidence = json.dumps({"readme": {"path": "README.md", "text": text}})
     return claim(text, quote=text), evidence
 
 

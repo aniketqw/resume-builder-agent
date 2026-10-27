@@ -7,6 +7,7 @@ from typing import Any
 
 import httpx
 
+
 def fake_secret(prefix: str, length: int = 36) -> str:
     """Build a credential-shaped string at runtime.
 

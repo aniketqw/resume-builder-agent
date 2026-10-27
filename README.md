@@ -50,11 +50,23 @@ GitHub's MCP server as its own short-lived container.
 ### Verify the install
 
 ```bash
-pytest                    # whole suite, offline, no credentials needed
+pytest                    # 185 tests, offline, no credentials needed
 rba config                # shows which model each graph node routes to
 rba doctor                # live credential + reachability check
 ./scripts/scan_secrets.sh # confirms no key is tracked by git
 ```
+
+### Use it
+
+```bash
+rba run <github-username> --dry-run     # projects the token spend, spends nothing
+rba run <github-username>               # full run; pauses for your review
+rba resume-run --thread default         # continue after reviewing
+python evals/run_eval.py --no-geval     # quality harness
+```
+
+Output lands in `out/`: `report.md`, one `resume_<role>.tex` per role, and PDFs
+if a LaTeX engine is installed.
 
 ---
 
@@ -71,10 +83,33 @@ Put these in `.env` (gitignored; never commit it). `.env.sample` lists the names
 
 ### GitHub access
 
-The agent talks to GitHub through the **official GitHub MCP server**
-(`ghcr.io/github/github-mcp-server`), launched in `--read-only` mode. Read-only is
-a hard gate in that server: write tools are stripped from the toolset even if
-something requests them.
+The agent talks to GitHub through the **official GitHub MCP server**. The default
+is GitHub's hosted endpoint at `https://api.githubcopilot.com/mcp/x/repos/readonly`,
+which needs no Docker.
+
+That exact path is deliberate. Enumerating both endpoints:
+
+| Endpoint | Tools | Write tools |
+|---|---:|---|
+| `/mcp/` | 46 | `create_or_update_file`, `delete_file`, `push_files`, `create_repository`, `fork_repository`, `merge_pull_request` |
+| `/mcp/x/repos/readonly` | 13 | none |
+
+The agent refuses to start if a write tool shows up in the toolset. Set
+`github.mcp.mode: docker` in `config.yaml` to run `ghcr.io/github/github-mcp-server`
+locally with `--read-only` instead, which is also a hard gate.
+
+Two behaviours worth knowing:
+
+- `search_repositories` (there is no `list_repositories`) **excludes forks**, which
+  is why MCP returns 98 repos where REST returns 113. It does return all private
+  repos. Forks are excluded by rule anyway.
+- There is **no `get_repository_tree`** on the hosted endpoint — it lives in the
+  `git` toolset, which only the local container exposes. Walking a tree with
+  `get_file_contents` costs one call per directory; across ~100 repos that was
+  ~500 calls, after which the endpoint started returning empty trees and the
+  session timed out. Trees therefore come from a single REST call
+  (`github.mcp.tree_via_rest`, on by default). Sessions are also rebuilt
+  automatically when they die mid-sweep.
 
 Three ways to authenticate, in order of preference:
 
@@ -134,6 +169,19 @@ These numbers were measured against the live API, not read off a pricing page.
 minute. One full evidence-linked repo summary costs ~2,074 tokens, so the ceiling
 is roughly **3.8 repo summaries per minute**.
 
+Measured on a real account (113 repos, 98 non-fork):
+
+| Stage | Work | Cost | Time |
+|---|---|---|---|
+| list + signals | 98 repos, 55 with a README | 0 LLM tokens | ~20 s |
+| Jev selection | 79 repos scored, 25 selected | 63,011 input tokens, **$0.0027** | ~10 s |
+| fetch facts | 25 repos, 23 READMEs, 11 test suites | 0 LLM tokens | ~90 s |
+| summarize | 8 repos, 51 claims | 20,608 Groq tokens | 302 s |
+
+Only the summarize/resume/plan stages spend Groq tokens. Everything upstream —
+including the decision about which repos are worth summarizing at all — is free
+or costs fractions of a cent, which is the entire point of the split.
+
 What the implementation does about it:
 
 - **Per-model token buckets.** Limits are per-model, so routing a step to a
@@ -181,8 +229,29 @@ Three layers, built on published metrics rather than vibes.
 Run it:
 
 ```bash
-python evals/run_eval.py          # traces to the LangSmith project
+python evals/run_eval.py                # faithfulness + G-Eval, traces to LangSmith
+python evals/run_eval.py --no-geval     # faithfulness only, much cheaper
 ```
+
+### What judging actually changed
+
+The first live run was judged against the real repositories, and the output was
+wrong in ways the tests had not caught:
+
+- The technology check scanned claim prose for "technology-shaped" tokens and
+  **rejected 39 of 48 real claims** over words like `fallback.` and `scripts.` —
+  a trailing period made them look like package names.
+- The impact regex matched bare nouns, so "MongoDB is used for **saving** and
+  searching documents" was flagged as an unmeasured performance claim.
+- Version masking used `\d+\.\d+`, which swallowed `0.81 accuracy` and `49.8%` —
+  precisely the numbers the module exists to police.
+- A claim about `tcell` cited a real `go.mod` line about `goccy/go-json`. The
+  quote existed, so it passed; it supported nothing in the claim.
+
+After those fixes, on 8 repositories: **48 of 51 claims verified, and all three
+rejections were correct.** The best of them: the model wrote *"losing 745 out of
+1484"*, having computed `1484 − 739` itself. The evidence contains 739 and 1484
+but never 745, so the claim was refused. That is the system working.
 
 ---
 
