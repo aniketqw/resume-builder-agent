@@ -1,0 +1,26 @@
+services:
+  rba:
+    build: .
+    image: resume-builder-agent:local
+    env_file: [.env]
+    environment:
+      # The agent shells out to `docker run ghcr.io/github/github-mcp-server`,
+      # so it needs the host daemon socket mounted below.
+      RBA_MCP_MODE: docker
+    volumes:
+      - ./out:/app/out
+      - ./.cache:/app/.cache
+      - ./config.yaml:/app/config.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    stdin_open: true
+    tty: true
+    command: ["--help"]
+
+  # Pre-pull the MCP server image so the first run isn't slowed by a pull.
+  # The agent starts its own `docker run -i --rm` instance per session; this
+  # service exists only to warm the image cache.
+  github-mcp:
+    image: ghcr.io/github/github-mcp-server
+    env_file: [.env]
+    command: ["--version"]
+    restart: "no"

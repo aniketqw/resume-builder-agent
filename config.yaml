@@ -1,0 +1,62 @@
+# Model IDs live here, never in code — Groq's lineup changes fast.
+# Verified against GET https://api.groq.com/openai/v1/models on 2026-10-28.
+groq:
+  base_url: https://api.groq.com/openai/v1
+  tiers:
+    small:    openai/gpt-oss-20b
+    mid:      openai/gpt-oss-20b
+    big:      openai/gpt-oss-120b
+    fallback: qwen/qwen3.8-27b      # json_object only; langchain-groq drops strict=True here
+  # Free-tier limits, confirmed from x-ratelimit-* response headers.
+  # Buckets are per-model, so tier routing also buys throughput.
+  limits:
+    default: {rpm: 30, rpd: 1000, tpm: 8000, tpd: 200000}
+    "openai/gpt-oss-safeguard-20b": {rpm: 3, rpd: 1000, tpm: 2000, tpd: 200000}
+  # gpt-oss models burn the completion budget on a `reasoning` field and return
+  # an EMPTY `content` if max_tokens is small. Both settings below are required.
+  defaults:
+    reasoning_effort: low
+    max_tokens: 1200
+    temperature: 0
+  # Stop cleanly before hitting a hard daily wall.
+  daily_stop_fraction: 0.9
+  token_estimate_margin: 0.10
+  max_retries: 5
+
+jev:
+  base_url: https://api.typesafe.ai
+  model: jev-latest
+  # Used ONLY for routing/selection. Never writes resume text.
+  enabled: true
+
+# Which node runs on which tier.
+routing:
+  summarize_repo:    small
+  build_resumes:     mid
+  compare:           big
+  plan_improvements: big
+  judge:             big
+
+selection:
+  max_repos: 25
+  min_claimable: 0.45
+  exclude_forks: true
+  min_commits: 2
+
+github:
+  mcp:
+    # "docker" uses ghcr.io/github/github-mcp-server over stdio (read-only).
+    # "remote" uses https://api.githubcopilot.com/mcp/ with a PAT.
+    # "rest"   is the dependency-free fallback via the GitHub REST API.
+    mode: docker
+    image: ghcr.io/github/github-mcp-server
+    toolsets: [context, repos, git]
+    read_only: true
+    remote_url: https://api.githubcopilot.com/mcp/
+  fetch:
+    readme_max_chars: 6000
+    max_tree_files: 120
+    max_commits: 30
+
+report:
+  out_dir: out
