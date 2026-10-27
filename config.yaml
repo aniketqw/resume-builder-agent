@@ -45,14 +45,25 @@ selection:
 
 github:
   mcp:
-    # "docker" uses ghcr.io/github/github-mcp-server over stdio (read-only).
-    # "remote" uses https://api.githubcopilot.com/mcp/ with a PAT.
+    # "remote" uses GitHub's hosted MCP endpoint with a PAT — no Docker needed.
+    # "docker" runs ghcr.io/github/github-mcp-server over stdio with --read-only.
     # "rest"   is the dependency-free fallback via the GitHub REST API.
-    mode: docker
+    mode: remote
     image: ghcr.io/github/github-mcp-server
     toolsets: [context, repos, git]
     read_only: true
-    remote_url: https://api.githubcopilot.com/mcp/
+    # The /x/repos/readonly path is deliberate. Verified by enumerating both:
+    # the plain /mcp/ endpoint hands out 46 tools INCLUDING delete_file,
+    # push_files and create_repository; /x/repos/readonly returns 13 tools and
+    # zero write tools. The agent refuses to start if a write tool shows up.
+    remote_url: https://api.githubcopilot.com/mcp/x/repos/readonly
+    # The hosted endpoint has no get_repository_tree (that tool lives in the
+    # `git` toolset, which only the local container exposes). Walking the tree
+    # with get_file_contents costs one call per directory: for ~100 repos that
+    # was ~500 calls, after which the endpoint returned empty trees and timed
+    # out. The REST trees API does the same job in one call per repo.
+    # Set false to stay strictly on MCP and accept the bounded walk.
+    tree_via_rest: true
   fetch:
     readme_max_chars: 6000
     max_tree_files: 120

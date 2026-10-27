@@ -7,9 +7,11 @@ from rba.nodes.select import (
     CLAIMABLE_Q,
     TIER_Q,
     apply_hard_rules,
+    drop_empty,
     heuristic_score,
     select_repos,
 )
+from rba.signals import RepoSignals
 from rba.state import RepoRef
 
 
@@ -19,14 +21,41 @@ def repo(name, **kw):
 
 
 # -- hard rules (free, deterministic) -------------------------------------
-def test_forks_and_archived_and_empty_are_excluded_without_a_model():
+def test_forks_and_archived_are_excluded_without_a_model():
     cfg = Config.load()
-    repos = [repo("real"), repo("forked", is_fork=True),
-             repo("old", is_archived=True), repo("blank", size_kb=0)]
+    repos = [repo("real"), repo("forked", is_fork=True), repo("old", is_archived=True)]
     keep, drop = apply_hard_rules(repos, cfg)
     assert [r.name for r in keep] == ["real"]
-    assert {r.name for r in drop} == {"forked", "old", "blank"}
+    assert {r.name for r in drop} == {"forked", "old"}
     assert all(r.selection_reason for r in drop), "every rejection needs a reason"
+
+
+def test_zero_size_is_not_treated_as_empty():
+    """MCP search_repositories omits `size`; judging emptiness on it rejected
+    all 98 repos in a live run. Emptiness is decided from signals instead."""
+    cfg = Config.load()
+    keep, drop = apply_hard_rules([repo("unknown-size", size_kb=0)], cfg)
+    assert [r.name for r in keep] == ["unknown-size"]
+    assert drop == []
+
+
+def test_drop_empty_uses_files_and_commits():
+    sigs = {}
+    for name, files, commits in [("empty", 0, 0), ("one-commit", 5, 1), ("real", 20, 12)]:
+        s = RepoSignals(name)
+        s.file_count, s.commit_count = files, commits
+        sigs[name] = s
+    keep, drop = drop_empty([repo("empty"), repo("one-commit"), repo("real")], sigs,
+                            min_commits=2)
+    assert [r.name for r in keep] == ["real"]
+    assert {r.name for r in drop} == {"empty", "one-commit"}
+    assert all(r.selection_reason for r in drop)
+
+
+def test_drop_empty_keeps_repos_with_no_signal_data():
+    """A failed signal fetch must not silently delete a repo."""
+    keep, drop = drop_empty([repo("unknown")], {}, min_commits=2)
+    assert [r.name for r in keep] == ["unknown"] and drop == []
 
 
 def test_private_repos_are_not_excluded():

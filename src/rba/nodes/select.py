@@ -78,7 +78,13 @@ def _state_for(repo: RepoRef, sig: RepoSignals | None) -> dict:
 
 
 def apply_hard_rules(repos: list[RepoRef], config: Config) -> tuple[list[RepoRef], list[RepoRef]]:
-    """Split into (candidates, rejected). Rejections carry a reason."""
+    """Split into (candidates, rejected) using only metadata we can trust.
+
+    Emptiness is deliberately *not* judged here. ``size_kb`` is absent from the
+    MCP ``search_repositories`` response, so treating 0 as "empty" would reject
+    every repository. Emptiness is a fact about files and commits, and it is
+    decided in :func:`drop_empty` once signals have been gathered.
+    """
     exclude_forks = config.get("selection.exclude_forks", True)
     candidates: list[RepoRef] = []
     rejected: list[RepoRef] = []
@@ -88,14 +94,33 @@ def apply_hard_rules(repos: list[RepoRef], config: Config) -> tuple[list[RepoRef
             reason = "fork — not the author's original work"
         elif r.is_archived:
             reason = "archived"
-        elif r.size_kb <= 0:
-            reason = "empty repository"
         if reason:
             r.selection_reason = reason
             rejected.append(r)
         else:
             candidates.append(r)
     return candidates, rejected
+
+
+def drop_empty(repos: list[RepoRef], signals: dict[str, RepoSignals],
+               min_commits: int = 2) -> tuple[list[RepoRef], list[RepoRef]]:
+    """Reject repos with no retrievable content. Needs signals, not metadata."""
+    keep: list[RepoRef] = []
+    drop: list[RepoRef] = []
+    for r in repos:
+        s = signals.get(r.name)
+        if s is None:
+            keep.append(r)
+            continue
+        if s.file_count == 0 and s.commit_count == 0:
+            r.selection_reason = "empty repository (no files, no commits)"
+            drop.append(r)
+        elif s.commit_count and s.commit_count < min_commits:
+            r.selection_reason = f"only {s.commit_count} commit(s) — not claimable"
+            drop.append(r)
+        else:
+            keep.append(r)
+    return keep, drop
 
 
 def heuristic_score(repo: RepoRef) -> float:
@@ -159,6 +184,11 @@ async def select_repos(state: AgentState, *, config: Config | None = None,
         n_readme = sum(1 for s in signals.values() if s.readme_chars)
         log.info("gathered signals for %d repos (%d have a README)",
                  len(signals), n_readme)
+        candidates, empties = drop_empty(
+            candidates, signals, cfg.get("selection.min_commits", 2))
+        if empties:
+            log.info("dropped %d empty or single-commit repos", len(empties))
+            rejected += empties
 
     owned_jev = jev is None
     jev = jev or JevClient(cfg)
