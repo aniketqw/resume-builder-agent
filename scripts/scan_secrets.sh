@@ -22,7 +22,10 @@ else
 fi
 
 echo "==> git history"
-if git rev-list --all 2>/dev/null | head -1 | grep -q .; then
+# Note: `git rev-list --all | head -1 | grep -q .` looks equivalent but is not.
+# head closes the pipe, rev-list dies on SIGPIPE, and the whole pipeline exits
+# non-zero -- so the history scan was skipped on a repo that had commits.
+if [ "$(git rev-list --count --all 2>/dev/null || echo 0)" -gt 0 ]; then
   if git log --all -p 2>/dev/null | grep -nEI "$PATTERN" | head -5; then
     echo "FAIL: credential found in git history"; status=1
   else
