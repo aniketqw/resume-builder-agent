@@ -1,6 +1,6 @@
 import pytest
-from fakes import FakeJev
 
+from fakes import FakeJev
 from rba.config import Config
 from rba.jev_client import JevClient, JevError, choice, noul
 

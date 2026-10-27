@@ -1,8 +1,8 @@
 
 import pytest
-from fakes import FakeGroq, chat_response, reasoning_trap_response
 from pydantic import BaseModel
 
+from fakes import FakeGroq, chat_response, reasoning_trap_response
 from rba.cache import Cache
 from rba.config import Config
 from rba.groq_client import MIN_MAX_TOKENS, GroqClient, GroqError

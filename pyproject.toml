@@ -49,6 +49,10 @@ ignore = [
   "B008",    # typer uses Option() in defaults by design
 ]
 
+[tool.ruff.lint.isort]
+# `fakes` and `conftest` are test-local modules, not third-party packages.
+known-first-party = ["rba", "fakes"]
+
 [tool.ruff.lint.per-file-ignores]
 # `doctor` is a diagnostic: it must report any provider failure, not raise.
 "src/rba/cli.py" = ["BLE001"]
