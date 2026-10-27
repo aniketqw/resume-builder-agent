@@ -76,5 +76,16 @@ summarize:
   # tokens; measured cost of a real one was 2,074 total tokens.
   max_evidence_chars: 7000
 
+plan:
+  max_steps_per_role: 5
+
 report:
   out_dir: out
+  # Which resumes to build. Matches the keys in src/rba/roles.yaml.
+  roles:
+    - ai_llm_agent_engineer
+    - ml_engineer
+    - backend_platform_engineer
+    - data_scientist
+    - balanced
+  contact: ""   # e.g. "Name | you@example.com | github.com/you | +91 ..."

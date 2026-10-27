@@ -161,4 +161,6 @@ class AgentState(TypedDict, total=False):
     plan: list[PlanStep]
     review: dict[str, Any]
     usage: dict[str, Any]
+    report_files: dict[str, str]
+    contact: str
     errors: Annotated[list[str], operator.add]

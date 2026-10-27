@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import shutil
 import subprocess
@@ -119,6 +120,141 @@ async def _network_checks(cfg: Config) -> list[tuple[str, bool, str]]:
         except Exception as exc:
             out.append(_check("github token", False, str(exc)[:80]))
     return out
+
+
+@app.command()
+def run(
+    username: str = typer.Argument(..., help="GitHub username to build from."),
+    contact: str = typer.Option("", help="Contact line for the resume header."),
+    review: bool = typer.Option(True, help="Pause for human review before the report."),
+    dry_run: bool = typer.Option(False, "--dry-run",
+                                 help="Estimate the token budget and spend nothing."),
+    thread: str = typer.Option("default", help="Checkpoint thread id, for resuming."),
+    mode: str = typer.Option("", help="Override github.mcp.mode: remote|docker|rest."),
+) -> None:
+    """Run the full graph: GitHub -> claims -> resumes -> plan -> report."""
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    for noisy in ("httpx", "httpcore", "mcp", "fastmcp"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+
+    cfg = Config.load()
+    if mode:
+        cfg.raw["github"]["mcp"]["mode"] = mode
+    if dry_run:
+        asyncio.run(_dry_run(cfg, username))
+        return
+
+    from .graph import Runner, build_graph, make_checkpointer
+
+    runner = Runner(cfg, contact=contact, review=review)
+    graph = build_graph(runner, make_checkpointer())
+    cfg_arg = {"configurable": {"thread_id": thread}, "recursion_limit": 50}
+
+    async def go():
+        try:
+            result = await graph.ainvoke({"username": username}, cfg_arg)
+            if "__interrupt__" in result:
+                payload = result["__interrupt__"][0].value
+                console.print("\n[bold yellow]Paused for review[/]")
+                console.print(payload)
+                console.print(
+                    f"\nResume with: [bold]rba resume --thread {thread}[/]")
+                return result
+            _print_summary(result)
+            return result
+        finally:
+            await runner.aclose()
+
+    asyncio.run(go())
+
+
+@app.command()
+def resume_run(
+    thread: str = typer.Option("default", help="Checkpoint thread id to resume."),
+    approve: bool = typer.Option(True, help="Approve as-is."),
+    note: str = typer.Option("", help="Edits or instructions to record."),
+) -> None:
+    """Resume a run that paused at human review."""
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    from langgraph.types import Command
+
+    from .graph import Runner, build_graph, make_checkpointer
+
+    cfg = Config.load()
+    runner = Runner(cfg)
+    graph = build_graph(runner, make_checkpointer())
+
+    async def go():
+        try:
+            result = await graph.ainvoke(
+                Command(resume={"approved": approve, "note": note}),
+                {"configurable": {"thread_id": thread}, "recursion_limit": 50})
+            _print_summary(result)
+        finally:
+            await runner.aclose()
+
+    asyncio.run(go())
+
+
+def _print_summary(result: dict) -> None:
+    scores = result.get("scores") or {}
+    claims = result.get("claims") or []
+    table = Table(title="ATS scores")
+    table.add_column("role")
+    table.add_column("score", justify="right")
+    for k, v in sorted(scores.items(), key=lambda kv: -kv[1].total):
+        table.add_row(k, f"{v.total:.1f}")
+    console.print(table)
+    verified = sum(1 for c in claims if c.status.value == "verified")
+    needs = sum(1 for c in claims if c.status.value == "needs_measure")
+    rejected = sum(1 for c in claims if c.status.value == "rejected")
+    console.print(f"claims: [green]{verified} verified[/], "
+                  f"[yellow]{needs} need measurement[/], [red]{rejected} rejected[/]")
+    for finding in (result.get("safety") or []):
+        console.print(f"[red]security[/] {finding.repo}/{finding.path}: {finding.kind}")
+    for label, path in (result.get("report_files") or {}).items():
+        console.print(f"{label}: {path}")
+    usage = result.get("usage") or {}
+    if usage.get("groq"):
+        console.print(f"groq tokens: {usage['groq'].get('total', 0)}")
+    if usage.get("jev"):
+        console.print(f"jev: ${usage['jev'].get('cost_usd', 0):.5f}")
+
+
+async def _dry_run(cfg: Config, username: str) -> None:
+    """Project the token spend without making a single Groq call."""
+    from .github_tools import make_backend
+    from .nodes.select import select_repos
+
+    backend = await make_backend(cfg)
+    try:
+        repos = await backend.list_repos(username)
+        state = await select_repos({"repos": repos, "username": username},
+                                   config=cfg, backend=backend)
+    finally:
+        await backend.aclose()
+
+    n = len(state["selected"])
+    # 2,074 tokens was the measured cost of one real evidence-linked summary.
+    per_summary = 2100
+    roles = len(cfg.get("report.roles") or [])
+    plan_calls = 2
+    projected = n * per_summary + roles * 2000 + plan_calls * 2500
+    tpm = cfg.limits_for(cfg.model_for_tier("small")).tpm
+
+    table = Table(title=f"dry run — {username}")
+    for col in ("step", "calls", "est. tokens"):
+        table.add_column(col, justify="right" if col != "step" else "left")
+    table.add_row("summarize_repo", str(n), f"{n * per_summary:,}")
+    table.add_row("build_resumes", str(roles), f"{roles * 2000:,}")
+    table.add_row("plan_improvements", str(plan_calls), f"{plan_calls * 2500:,}")
+    table.add_row("[bold]total", f"[bold]{n + roles + plan_calls}",
+                  f"[bold]{projected:,}")
+    console.print(table)
+    console.print(f"At {tpm:,} tokens/min that is roughly "
+                  f"[bold]{projected / tpm:.1f} minutes[/] of rate-limited time.")
+    console.print(f"Jev already scored {len(repos)} repos for "
+                  f"${state['usage']['jev']['cost_usd']:.5f} (not Groq tokens).")
 
 
 @app.command()

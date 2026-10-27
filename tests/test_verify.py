@@ -26,6 +26,16 @@ def claim(text, path="README.md", quote="34 tests, about 2 s"):
                  evidence=[Evidence(path=path, quote=quote)])
 
 
+def self_evidenced(text):
+    """A claim whose quote is the claim itself, inside matching evidence.
+
+    Lets a test exercise one rule (numbers, impact language) without the quote
+    presence and relevance checks firing first on an unrelated fixture quote.
+    """
+    evidence = '{"readme": {"path": "README.md", "text": "%s"}}' % text
+    return claim(text, quote=text), evidence
+
+
 # -- the core guarantee ---------------------------------------------------
 def test_invented_number_is_never_verified():
     """The headline guarantee: a fabricated metric cannot become a resume bullet."""
@@ -68,7 +78,8 @@ def test_unquantified_effect_claim_needs_measurement():
 def test_ordinary_descriptions_are_not_treated_as_performance_claims(text):
     """Regression: 'saving' and 'performance' as bare nouns caused false flags."""
     assert not is_impact_claim(text)
-    assert verify_claim(claim(text), EVIDENCE).status is ClaimStatus.VERIFIED
+    c, evidence = self_evidenced(text)
+    assert verify_claim(c, evidence).status is ClaimStatus.VERIFIED
 
 
 @pytest.mark.parametrize("text", [
@@ -147,8 +158,8 @@ def test_versions_and_years_are_not_treated_as_metrics():
     assert numbers_in("Built with Python 3.11 in 2026") == []
     assert numbers_in("Spring Boot 3.1.5 backend") == []
     assert numbers_in("v2.1.0 release") == []
-    assert verify_claim(claim("Built with Python 3.11"), EVIDENCE).status \
-        is ClaimStatus.VERIFIED
+    c, evidence = self_evidenced("Built with Python 3.11 and unittest")
+    assert verify_claim(c, evidence).status is ClaimStatus.VERIFIED
 
 
 def test_decimal_metrics_are_not_mistaken_for_versions():
@@ -177,9 +188,8 @@ def test_invented_technologies_are_dropped():
 def test_tech_mismatch_does_not_invalidate_a_claim():
     """Regression: scanning claim prose for tech-shaped words rejected 39 of 48
     real claims over words like 'fallback.' and 'scripts.'"""
-    c = verify_claim(claim("Provides a local-model fallback and export scripts."),
-                     EVIDENCE)
-    assert c.status is ClaimStatus.VERIFIED
+    c, evidence = self_evidenced("Provides a local-model fallback and export scripts.")
+    assert verify_claim(c, evidence).status is ClaimStatus.VERIFIED
 
 
 # -- node -----------------------------------------------------------------
