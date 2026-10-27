@@ -7,6 +7,21 @@ from typing import Any
 
 import httpx
 
+def fake_secret(prefix: str, length: int = 36) -> str:
+    """Build a credential-shaped string at runtime.
+
+    The literal must never appear in source: scripts/scan_secrets.sh scans this
+    repository too, and a realistic-looking token in a fixture is exactly what
+    it is supposed to catch. Characters vary so the result does not trip the
+    scanner's placeholder rule ("xxxxxxxx" reads as documentation, not a key).
+    """
+    import string
+
+    alphabet = string.ascii_letters + string.digits
+    body = "".join(alphabet[(i * 7 + 13) % len(alphabet)] for i in range(length))
+    return prefix + body
+
+
 RATE_HEADERS = {
     "x-ratelimit-limit-requests": "1000",
     "x-ratelimit-limit-tokens": "8000",

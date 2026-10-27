@@ -1,3 +1,4 @@
+from fakes import fake_secret
 from rba.nodes.safety import _redact, safety_scan, scan_content, scan_paths
 from rba.state import RepoFacts
 
@@ -32,11 +33,11 @@ def test_browser_profile_is_flagged():
 # -- content rules --------------------------------------------------------
 def test_detects_real_credential_shapes():
     cases = {
-        "groq-key": "GROQ_API_KEY=gsk_" + "a" * 48,
-        "langsmith-key": "key: lsv2_pt_" + "b" * 32 + "_" + "c" * 10,
-        "github-token": "token ghp_REDACTED_TEST_FIXTURE",
+        "groq-key": "GROQ_API_KEY=" + fake_secret("gsk_", 48),
+        "langsmith-key": "key: " + fake_secret("lsv2_pt_", 40),
+        "github-token": "token " + fake_secret("ghp_", 36),
         "aws-access-key": "AKIA2B7QX9ZLMNPQRSTU",
-        "anthropic-key": "sk-ant-" + "e" * 40,
+        "anthropic-key": fake_secret("sk-ant-", 40),
         "private-key": "-----BEGIN RSA PRIVATE KEY-----",
     }
     for kind, text in cases.items():
@@ -50,7 +51,7 @@ def test_aws_documentation_key_is_treated_as_a_placeholder():
 
 def test_anthropic_key_is_not_misreported_as_openai():
     """`sk-ant-...` also matches the broader `sk-...` shape; the specific wins."""
-    f = scan_content("r", "f", "sk-ant-" + "e" * 40)
+    f = scan_content("r", "f", fake_secret("sk-ant-", 40))
     assert kinds(f) == {"anthropic-key"}
 
 
@@ -73,22 +74,22 @@ def test_repeated_character_runs_read_as_placeholders():
 
 
 def test_finding_records_line_number_and_never_the_secret():
-    key = "gsk_" + "z" * 48
+    key = fake_secret("gsk_", 48)
     text = f"line one\nline two\nGROQ_API_KEY={key}\n"
     f = scan_content("r", "cfg.py", text)[0]
     assert f.path == "cfg.py:3"
     assert key not in f.detail, "the secret value must never be echoed back"
-    assert "gsk_zz" in f.detail, "but enough shape to find it"
+    assert key[:6] in f.detail, "but enough shape to find it"
 
 
 def test_redaction_keeps_it_unusable():
-    key = "gsk_" + "q" * 48
+    key = fake_secret("gsk_", 48)
     r = _redact(key)
     assert key not in r and len(r) < len(key)
 
 
 def test_one_finding_per_kind_per_file():
-    text = "\n".join(f"K{i}=gsk_{'a' * 48}" for i in range(5))
+    text = "\n".join(f"K{i}={fake_secret('gsk_', 48)}" for i in range(5))
     assert len(scan_content("r", "f", text)) == 1
 
 
@@ -97,7 +98,7 @@ async def test_safety_scan_covers_tree_readme_and_key_files():
     facts = RepoFacts(
         repo="leaky",
         tree=["src/app.py", ".env"],
-        readme="Set GITHUB_TOKEN=ghp_REDACTED_TEST_FIXTURE",
+        readme="Set GITHUB_TOKEN=" + fake_secret("ghp_", 36),
         readme_path="README.md",
         key_files={"docker-compose.yml": "AWS_KEY: AKIA2B7QX9ZLMNPQRSTU"},
     )
