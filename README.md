@@ -1,5 +1,14 @@
 # Resume Builder Agent
 
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://resume-builder-agent.streamlit.app)
+
+**[Try the resume scorer →](https://resume-builder-agent.streamlit.app)** —
+paste a resume and a job description, see the score broken into three channels
+with the formula printed on the page. No sign-up, no API key.
+
+> The app sleeps after 12 hours without traffic. A cold link shows a
+> "Yes, get this app back up!" button — click it and give it about 30 seconds.
+
 Reads a GitHub account, turns each repository into **evidence-backed facts**, and
 builds role-targeted resumes plus an improvement plan where every item points at a
 real file or commit.
