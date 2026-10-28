@@ -36,7 +36,6 @@ from judge import (  # noqa: E402
     summary_text,
     weighted_overall,
 )
-
 from rba.config import Config  # noqa: E402
 from rba.groq_client import GroqClient  # noqa: E402
 from rba.nodes.summarize import summarize_one  # noqa: E402

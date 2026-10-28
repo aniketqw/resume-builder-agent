@@ -31,4 +31,4 @@ jobs:
           LANGSMITH_TRACING: "false"
           GITHUB_PERSONAL_ACCESS_TOKEN: test-dummy
         run: pytest
-      - run: ruff check src tests evals
+      - run: ruff check src tests evals scripts
