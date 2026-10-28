@@ -1,8 +1,8 @@
 # Resume Builder Agent
 
-[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://resume-builder-agent.streamlit.app)
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://aniketqw-resumebuilder.streamlit.app)
 
-**[Try the resume scorer →](https://resume-builder-agent.streamlit.app)** —
+**[Try the resume scorer →](https://aniketqw-resumebuilder.streamlit.app)** —
 paste a resume and a job description, see the score broken into three channels
 with the formula printed on the page. No sign-up, no API key.
 
