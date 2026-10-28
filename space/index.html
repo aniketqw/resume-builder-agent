@@ -1136,6 +1136,33 @@ number precision both measure <strong>1.00</strong>. Whole-summary faithfulness 
 and that gap is reported rather than averaged away: the descriptive
 <code>problem</code> and <code>approach</code> fields are framing, are not run through
 <code>verify_claims</code>, and can contain fair-sounding inference.</p>
+<h3 id="reproducibility-measured">Reproducibility, measured</h3>
+<p>Two independent runs over the same repositories, both at <code>temperature: 0</code>:</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>Half of the pipeline</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Verification (<code>verify_claims</code>)</td>
+<td><strong>Identical.</strong> Same 102/111 verdicts, the same 6 rejections, the same reasons.</td>
+</tr>
+<tr>
+<td>Generation (<code>build_resumes</code>)</td>
+<td><strong>Variable.</strong> ATS scores moved by up to <strong>24 points</strong> (<code>balanced</code> 59.1 → 34.8).</td>
+</tr>
+</tbody>
+</table></div>
+<p>That split is the design working as intended, not an accident: the half that
+decides what may be <em>said</em> is deterministic Python, so it cannot drift. The
+half that decides <em>how</em> to say it is a language model, and Groq's <code>gpt-oss</code>
+models are not reproducible even at temperature 0.</p>
+<p>The practical consequence is worth stating plainly: <strong>treat a single ATS score
+as indicative, not precise.</strong> What is stable is which claims are allowed
+through — and that is the property the project actually promises.</p>
 <h3 id="operating-inside-a-free-tier">Operating inside a free tier</h3>
 <p>The binding constraint is <strong>8,000 tokens per minute</strong>, not the request rate.
 One evidence-linked repository summary costs about 2,074 tokens, so the ceiling

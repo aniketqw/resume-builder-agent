@@ -254,6 +254,24 @@ reasonable reading of a repository's purpose and still nowhere in its README.
 The two are measured separately rather than averaged into one flattering
 number, and only claims reach a resume.
 
+### Reproducibility, measured
+
+Two independent runs over the same repositories, both at `temperature: 0`:
+
+| Half of the pipeline | Result |
+|---|---|
+| Verification (`verify_claims`) | **Identical.** Same 102/111 verdicts, the same 6 rejections, the same reasons. |
+| Generation (`build_resumes`) | **Variable.** ATS scores moved by up to **24 points** (`balanced` 59.1 → 34.8). |
+
+That split is the design working as intended, not an accident: the half that
+decides what may be *said* is deterministic Python, so it cannot drift. The
+half that decides *how* to say it is a language model, and Groq's `gpt-oss`
+models are not reproducible even at temperature 0.
+
+The practical consequence is worth stating plainly: **treat a single ATS score
+as indicative, not precise.** What is stable is which claims are allowed
+through — and that is the property the project actually promises.
+
 ### What judging actually changed
 
 The first live run was judged against the real repositories, and the output was
