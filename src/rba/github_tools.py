@@ -508,23 +508,31 @@ def subprocess_run_ok(cmd: list[str]) -> bool:
     return subprocess.run(cmd, capture_output=True, check=False, timeout=20).returncode == 0
 
 
-async def make_backend(config: Config | None = None, mode: str | None = None):
-    """Build a backend, falling back from MCP to REST with a clear log line."""
+async def make_backend(config: Config | None = None, mode: str | None = None,
+                       token: str | None = None):
+    """Build a backend, falling back from MCP to REST with a clear log line.
+
+    `token` is passed explicitly by callers that hold a per-request credential
+    (the web app asks each visitor for their own). Without it the backends read
+    the environment, which is right for the CLI and wrong for a hosted app --
+    there is no .env on Streamlit, so the env path raised RuntimeError and the
+    UI reported a bare "Import failed".
+    """
     cfg = config or Config.load()
     mode = mode or cfg.get("github.mcp.mode", "remote")
     if mode == "rest":
-        return RestBackend(config=cfg)
+        return RestBackend(config=cfg, token=token)
     if mode == "docker" and not McpBackend.docker_available():
         log.warning("Docker daemon unavailable; using GitHub's hosted MCP endpoint.")
         mode = "remote"
-    backend = McpBackend(config=cfg, mode=mode)
+    backend = McpBackend(config=cfg, mode=mode, token=token)
     try:
         await backend.connect()
         return backend
     except Exception as exc:
         log.warning("MCP backend unavailable (%s); falling back to REST.", exc)
         await backend.aclose()
-        return RestBackend(config=cfg)
+        return RestBackend(config=cfg, token=token)
 
 
 __all__ = ["MCP_TOOLS", "GitHubBackend", "McpBackend", "RestBackend", "make_backend"]

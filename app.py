@@ -11,6 +11,7 @@ makes no LLM call -- one ONNX embedding plus arithmetic, ~150 ms per toggle.
 from __future__ import annotations
 
 import asyncio
+import re
 import sys
 from pathlib import Path
 
@@ -103,6 +104,38 @@ def sidebar() -> dict:
     return config
 
 
+# Credential-shaped text must never reach the screen: this app is public.
+_TOKENISH = re.compile(r"\b(?:gsk|ghp|gho|hf|lsv2_pt)[_-][A-Za-z0-9_-]+")
+
+
+def _diagnose(exc: Exception) -> str:
+    """Turn an exception into something the user can act on.
+
+    The first version printed only `type(exc).__name__`, so a missing GitHub
+    token surfaced as a bare "Import failed: RuntimeError" -- true, and useless.
+    """
+    message = _TOKENISH.sub("[redacted]", str(exc))
+    lowered = message.lower()
+    if "github_personal_access_token" in lowered or "github token" in lowered:
+        return ("No GitHub token reached the importer. Paste a token in the "
+                "sidebar — unauthenticated GitHub allows only 60 requests an "
+                "hour, shared across everyone using this app.")
+    if "groq_api_key" in lowered:
+        return "Paste a Groq API key in the sidebar; summarising needs one."
+    if "401" in message or "bad credentials" in lowered:
+        return ("GitHub rejected the token. Check it has not expired and that "
+                "it carries at least `public_repo` scope.")
+    if "403" in message or "rate limit" in lowered:
+        return ("GitHub rate-limited the request. With a token you get 5,000 "
+                "requests an hour; without one, 60.")
+    if "404" in message or "not found" in lowered:
+        return "That GitHub username does not exist, or has no public repositories."
+    if "429" in message:
+        return ("Groq rate-limited the request. The free tier allows 8,000 "
+                "tokens a minute — try fewer repositories.")
+    return f"Import failed: {message[:200]}"
+
+
 def split(value: str) -> list[str]:
     return [part.strip() for part in (value or "").split(",") if part.strip()]
 
@@ -126,9 +159,9 @@ def build(config: dict) -> None:
                 max_repos=config.get("max_repos", 5), progress=report))
         except Exception as exc:
             bar.empty()
-            st.error(f"Import failed: {type(exc).__name__}. Check the username, "
-                     f"the token's scope, and that the Groq key is valid.")
-            st.caption(str(exc)[:300])
+            st.error(_diagnose(exc))
+            with st.expander("Technical detail"):
+                st.code(f"{type(exc).__name__}: {exc}"[:800])
             return
         bar.empty()
         store.doc, store.stats = doc, stats

@@ -14,6 +14,7 @@ from collections.abc import Callable
 from ..config import Config
 from ..github_tools import make_backend
 from ..groq_client import GroqClient
+from ..jev_client import JevClient
 from ..nodes.fetch import fetch_facts
 from ..nodes.select import select_repos
 from ..nodes.summarize import summarize_repos
@@ -40,7 +41,7 @@ async def build_from_github(username: str, *, github_token: str = "",
     cfg.raw["selection"]["max_repos"] = max_repos
 
     report("Connecting to GitHub…", 0.05)
-    backend = await make_backend(cfg)
+    backend = await make_backend(cfg, token=github_token or None)
     stats: dict = {}
     try:
         repos = await backend.list_repos(username)
@@ -50,7 +51,15 @@ async def build_from_github(username: str, *, github_token: str = "",
         report(f"Found {len(public)} public repositories", 0.15)
 
         state: dict = {"username": username, "repos": public}
-        state |= await select_repos(state, config=cfg, backend=backend)
+        # Jev is optional: without a key, select_repos falls back to a
+        # heuristic rather than failing the whole import.
+        jev = JevClient(cfg, api_key=jev_key or "") if jev_key else None
+        try:
+            state |= await select_repos(state, config=cfg, backend=backend,
+                                        jev=jev)
+        finally:
+            if jev is not None:
+                await jev.aclose()
         chosen = state.get("selected", [])
         stats["selected"] = len(chosen)
         report(f"Selected {len(chosen)} worth describing", 0.3)
