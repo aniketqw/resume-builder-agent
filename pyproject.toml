@@ -50,6 +50,9 @@ pythonpath = ["src"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = "-q"
+markers = [
+  "slow: touches the embedding model; timing-sensitive",
+]
 
 [tool.ruff]
 line-length = 100

@@ -1,0 +1,50 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=0.75in]{geometry}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\setlist[itemize]{leftmargin=*,topsep=2pt,itemsep=1pt}
+\pagestyle{empty}
+\begin{document}
+
+\begin{center}{\LARGE\bfseries Data Scientist – Turning Data into Measured Answers}\\[4pt]
+Aniket Saxena | h20250169@pilani.bits-pilani.ac.in | github.com/aniketqw\end{center}
+
+\section*{Summary}
+Designed and implemented data pipelines that ingest, clean, and validate structured and unstructured data, storing results in MongoDB. Developed feature extraction and evidence export workflows for video analysis, producing JSON, CSV, and visual timelines. Built robust, deterministic processing stages with LLM‑based semantic extraction and continuous integration testing.
+
+\section*{Projects}
+\begin{itemize}
+  \item Implemented a data pipeline that processes acquisition, cleaning, chunking, extraction, validation, and storage in MongoDB, ensuring idempotent updates and provenance tracking.
+  \item Designed a multi‑source ingestion system that maps data to URLs and stores provenance, chunks, and facts in dedicated MongoDB collections.
+  \item Validated facts by confirming source quotes appear verbatim in originating chunks, guaranteeing data integrity.
+  \item Built a deterministic Python pipeline with an LLM‑based semantic extraction step, isolating each stage for debugging with demo scripts.
+  \item Developed a video analysis system that uses TransNet V2 or an adaptive detector to identify shot leaves and keyframes, extracting CLIP or color features and sampled OCR from keyframes.
+  \item Constructed an adjacent chronological hierarchy feeding an interactive timeline and node explorer, outputting evidence in JSON, CSV, thumbnails, and a checksum ZIP.
+  \item Created a 239‑paper research catalogue and literature surveys in LaTeX, supporting evidence retrieval and reference‑frame replay.
+  \item Implemented continuous‑integration configuration and a comprehensive test suite to ensure reliability of the video analysis repository.
+  \item Implemented a multi‑threaded C pipeline for AoA protection, parsing UART frames, validating sensor data with median filtering and outlier rejection, estimating AoA with weighted fusion and a Kalman filter, and classifying flight states via a finite‑state machine driven by CSV‑defined thresholds.
+  \item Built a LangChain ReAct Agent using Ollama and MongoDB for interactive agent demos.
+  \item 
+\end{itemize}
+
+\section*{Skills}
+\begin{itemize}
+  \item Python
+  \item MongoDB
+  \item LLM
+  \item TransNet V2
+  \item CLIP
+  \item OCR
+  \item JSON
+  \item CSV
+  \item Docker Compose
+  \item C
+  \item Kalman filter
+  \item Median filtering
+  \item Outlier rejection
+  \item Finite‑state machine
+  \item LangChain
+  \item Ollama
+\end{itemize}
+
+\end{document}
