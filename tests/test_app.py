@@ -6,9 +6,9 @@ A broken `app.py` fails only at runtime on Community Cloud, where
 import pytest
 
 pytest.importorskip("streamlit")
-from pathlib import Path  # noqa: E402
+from pathlib import Path
 
-from streamlit.testing.v1 import AppTest  # noqa: E402
+from streamlit.testing.v1 import AppTest
 
 APP = str(Path(__file__).resolve().parents[1] / "app.py")
 
