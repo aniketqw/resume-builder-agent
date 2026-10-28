@@ -149,13 +149,29 @@ async def g_eval(client: GroqClient, summary_text: str, evidence: str,
 
 
 def summary_text(summary: RepoSummary, verified_only: bool = True) -> str:
-    """Render a summary the way a judge should see it."""
+    """Render a summary the way a judge should see it: prose plus claims."""
     parts = [summary.one_line, summary.problem, summary.approach]
-    for c in summary.claims:
-        if verified_only and c.status is not ClaimStatus.VERIFIED:
-            continue
-        parts.append(c.text)
+    parts += _claim_lines(summary, verified_only)
     return "\n".join(p for p in parts if p)
+
+
+def claims_only_text(summary: RepoSummary) -> str:
+    """Just the verified claims.
+
+    This is the text that actually reaches a resume. The prose fields
+    (`problem`, `approach`) are descriptive framing and are *not* run through
+    verify_claims, so they can contain reasonable-sounding inference -- "the
+    original model does not account for distance between data points" is a fair
+    reading of a repository's purpose and still nowhere in its README.
+    Measuring the two separately keeps that distinction visible instead of
+    averaging it away.
+    """
+    return "\n".join(_claim_lines(summary, verified_only=True))
+
+
+def _claim_lines(summary: RepoSummary, verified_only: bool) -> list[str]:
+    return [c.text for c in summary.claims
+            if not verified_only or c.status is ClaimStatus.VERIFIED]
 
 
 # -- deterministic checks, no model needed --------------------------------

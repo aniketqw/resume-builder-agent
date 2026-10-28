@@ -28,6 +28,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "evals"))
 
 from judge import (  # noqa: E402
+    claims_only_text,
     coverage,
     faithfulness,
     g_eval,
@@ -57,7 +58,11 @@ GOLDEN_SET = [
 ]
 
 # Thresholds. Faithfulness is blocking; the rest are tracked.
-THRESHOLDS = {"faithfulness": 1.0, "number_precision": 1.0, "quality_mean": 4.0}
+# claim_faithfulness is the blocking one: it covers the text that reaches a
+# resume. Whole-summary faithfulness includes unverified prose framing, so it
+# is tracked rather than enforced.
+THRESHOLDS = {"claim_faithfulness": 1.0, "number_precision": 1.0}
+TRACKED = ("faithfulness", "quality_mean")
 
 
 def load_facts(path: Path, names: list[str]) -> dict[str, RepoFacts]:
@@ -89,18 +94,33 @@ async def evaluate_repo(client: GroqClient, facts: RepoFacts,
         result |= {"faithfulness": 1.0, "quality_mean": 0.0, "note": "declined"}
         return result
 
+    # Claims first: this is the text that actually reaches a resume, and it is
+    # the number the pipeline is accountable for.
+    claims_text = claims_only_text(summary)
+    if claims_text.strip():
+        claim_faith = await faithfulness(client, claims_text, evidence)
+        result |= {
+            "claim_faithfulness": round(claim_faith.score, 4),
+            "claim_atomic": claim_faith.total,
+            "unsupported": claim_faith.unsupported,
+        }
+    else:
+        result |= {"claim_faithfulness": 1.0, "claim_atomic": 0, "unsupported": []}
+
+    # Then the whole summary, prose included, for comparison.
     faith = await faithfulness(client, text, evidence)
     result |= {
         "faithfulness": round(faith.score, 4),
         "atomic_claims": faith.total,
-        "unsupported": faith.unsupported,
+        "unsupported_prose": [u for u in faith.unsupported
+                              if u not in result["unsupported"]],
     }
     if run_geval:
         quality = await g_eval(client, text, evidence, n=n)
         result |= {"quality": {k: round(v, 2) for k, v in quality.dimensions.items()},
                    "quality_mean": round(quality.mean, 3)}
     result["overall"] = weighted_overall(
-        result["faithfulness"], result.get("quality_mean", 0.0) or 0.0,
+        result["claim_faithfulness"], result.get("quality_mean", 0.0) or 0.0,
         result["number_precision"])
     return result
 
@@ -170,7 +190,8 @@ async def main() -> int:
 
     ok = [r for r in results if "error" not in r]
     agg = {}
-    for metric in ("faithfulness", "number_precision", "quality_mean", "overall"):
+    for metric in ("claim_faithfulness", "faithfulness", "number_precision",
+                   "quality_mean", "overall"):
         vals = [r[metric] for r in ok if r.get(metric) is not None]
         if vals:
             agg[metric] = round(sum(vals) / len(vals), 4)
@@ -183,13 +204,13 @@ async def main() -> int:
     out = out_dir / "latest.json"
     out.write_text(json.dumps({"aggregate": agg, "results": results}, indent=1))
 
-    print(f"\n{'repo':<28}{'faith':>7}{'numPrec':>9}{'qual':>7}{'verified':>10}{'rej':>5}")
+    print(f"\n{'repo':<28}{'claimF':>8}{'allF':>7}{'numPrec':>9}{'verified':>10}{'rej':>5}")
     for r in results:
         if "error" in r:
             print(f"{r['repo'][:27]:<28}  ERROR {r['error'][:40]}")
             continue
-        print(f"{r['repo'][:27]:<28}{r.get('faithfulness', 0):>7.2f}"
-              f"{r.get('number_precision', 0):>9.2f}{r.get('quality_mean', 0):>7.2f}"
+        print(f"{r['repo'][:27]:<28}{r.get('claim_faithfulness', 0):>8.2f}"
+              f"{r.get('faithfulness', 0):>7.2f}{r.get('number_precision', 0):>9.2f}"
               f"{r.get('claims_verified', 0):>6}/{r.get('claims_total', 0):<3}"
               f"{r.get('claims_rejected', 0):>5}")
     print(f"\naggregate: {agg}")

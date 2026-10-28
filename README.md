@@ -176,7 +176,10 @@ Measured on a real account (113 repos, 98 non-fork):
 | list + signals | 98 repos, 55 with a README | 0 LLM tokens | ~20 s |
 | Jev selection | 79 repos scored, 25 selected | 63,011 input tokens, **$0.0027** | ~10 s |
 | fetch facts | 25 repos, 23 READMEs, 11 test suites | 0 LLM tokens | ~90 s |
-| summarize | 8 repos, 51 claims | 20,608 Groq tokens | 302 s |
+| summarize | 25 repos, 151 claims | ~52,000 Groq tokens | ~9 min |
+| verify | 139/151 verified, 7 rejected | 0 tokens (pure Python) | <1 s |
+| resumes + plan | 5 resumes, 10 plan steps | ~12,000 Groq tokens | ~2 min |
+| re-run (cached) | same 25 repos | **0 tokens, 0 s** | 100% cache hit |
 
 Only the summarize/resume/plan stages spend Groq tokens. Everything upstream —
 including the decision about which repos are worth summarizing at all — is free
@@ -233,6 +236,24 @@ python evals/run_eval.py                # faithfulness + G-Eval, traces to LangS
 python evals/run_eval.py --no-geval     # faithfulness only, much cheaper
 ```
 
+### Measured quality
+
+From `evals/run_eval.py`, judged by `gpt-oss-120b`:
+
+| Metric | Result | Blocking? |
+|---|---:|---|
+| **claim faithfulness** — the text that reaches a resume | **1.00** | yes |
+| **number precision** — numbers traceable to evidence | **1.00** | yes |
+| whole-summary faithfulness — *includes unverified prose* | 0.83 | tracked |
+
+That gap is the honest part. `verify_claims` governs the **claims**, and those
+are fully grounded. The descriptive `problem` and `approach` fields are framing
+and are *not* verified, so they can contain fair-sounding inference — "the
+original model does not account for distance between data points" is a
+reasonable reading of a repository's purpose and still nowhere in its README.
+The two are measured separately rather than averaged into one flattering
+number, and only claims reach a resume.
+
 ### What judging actually changed
 
 The first live run was judged against the real repositories, and the output was
@@ -252,6 +273,25 @@ After those fixes, on 8 repositories: **48 of 51 claims verified, and all three
 rejections were correct.** The best of them: the model wrote *"losing 745 out of
 1484"*, having computed `1484 − 739` itself. The evidence contains 739 and 1484
 but never 745, so the claim was refused. That is the system working.
+
+Three later bugs were each caught by running the thing rather than reasoning
+about it, and each had been **silently destroying good output**:
+
+- `_strictify` stripped `title`, `default` and `examples` as noisy JSON-Schema
+  annotations — including when they were the model's own **field names**. The
+  plan schema lost its `title` field, so every generated step failed validation
+  and the planner burned nine minutes on retries. One plan call now takes 3 s.
+- The provenance check read the digits in claim-id citations as invented
+  numbers: the generator appends `(AiAgnoSample#0, #1)` — and, unprompted, the
+  full-width `【AOA_Controller_ty#0】` — so `#0` parsed as the number 0. This
+  dropped **19 legitimate bullets in one run and 8 more in the next**. After
+  the fix, all five resumes build with zero false drops and the balanced
+  resume went from 32.9 to 61.2/100.
+- The rate-limit header override never expired. `x-ratelimit-remaining-tokens`
+  is a snapshot of the current minute, but it was cached forever, so once a
+  response reported a low figure the limiter believed it had no budget for the
+  life of the process and slept a full minute before every call. A 3-second
+  judge call became one that never finished.
 
 ---
 
