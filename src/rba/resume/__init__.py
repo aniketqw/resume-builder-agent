@@ -9,7 +9,8 @@ Two pieces:
   leave-one-out.
 """
 from .attribution import Attribution, BulletImpact, attribute, rescore
-from .document import Bullet, ResumeDoc, Section
+from .document import Bullet, ResumeDoc, Section, from_summaries
+from .pipeline import build_from_github, parse_resume_text
 
 __all__ = [
     "Attribution",
@@ -18,5 +19,8 @@ __all__ = [
     "ResumeDoc",
     "Section",
     "attribute",
+    "build_from_github",
+    "from_summaries",
+    "parse_resume_text",
     "rescore",
 ]

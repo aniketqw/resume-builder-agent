@@ -1,57 +1,88 @@
-"""The Streamlit app must render and score without raising.
+"""The Streamlit app must render, build and score without raising.
 
-A broken `app.py` fails only at runtime on Community Cloud, where the traceback
-is hidden from viewers by `showErrorDetails = "none"`. Catching it here is the
-difference between a failing test and a blank public page.
+A broken `app.py` fails only at runtime on Community Cloud, where
+`showErrorDetails = "none"` hides the traceback and viewers get a blank page.
 """
 import pytest
 
 pytest.importorskip("streamlit")
-from streamlit.testing.v1 import AppTest
+from pathlib import Path  # noqa: E402
 
-from rba.ats.fusion import CHANNEL_WEIGHTS
+from streamlit.testing.v1 import AppTest  # noqa: E402
+
+APP = str(Path(__file__).resolve().parents[1] / "app.py")
+
+RESUME = ("Jane Doe\nBackend Engineer\njane@example.com\n\nExperience:\n"
+          "- Built Python FastAPI services with Docker\n"
+          "- Deployed on Kubernetes and wrote REST APIs\n"
+          "- Organised the office social committee\n")
 
 
-def _app() -> AppTest:
-    app = AppTest.from_file(str(__import__("pathlib").Path(__file__).parents[1]
-                                / "app.py"), default_timeout=180)
+def built_app() -> AppTest:
+    app = AppTest.from_file(APP, default_timeout=240)
     app.run()
+    app.sidebar.radio[0].set_value("Paste or upload").run()
+    app.sidebar.text_area[0].set_value(RESUME).run()
+    app.sidebar.button[0].click().run()
     return app
 
 
 def test_app_renders_without_exception():
-    app = _app()
+    app = AppTest.from_file(APP, default_timeout=120)
+    app.run()
     assert not app.exception, app.exception
-    assert app.title[0].value == "Resume Scorer"
+    assert app.title[0].value == "Resume Builder"
 
 
-def test_app_scores_without_exception():
-    app = _app()
-    # Semantic channel off: keeps the test offline and fast.
-    app.toggle[0].set_value(False)
-    app.button[0].click().run()
+def test_pasted_resume_becomes_an_editable_scored_document():
+    app = built_app()
     assert not app.exception, app.exception
     labels = {m.label: m.value for m in app.metric}
-    # The headline is a percentile when the reference set matches the channels
-    # used, and a raw score otherwise. Both are valid; neither is "/100 ATS".
-    assert "Percentile" in labels or "Score (raw)" in labels
-    assert labels["Band"] in {"Strong match", "Good match",
-                              "Partial match", "Limited match"}
+    assert "Score" in labels and "Band" in labels
+    # One checkbox per parsed bullet, so each line can be toggled.
+    assert len(app.checkbox) == 3
 
 
-def test_a_disabled_channel_is_shown_as_dropped_not_zero():
-    app = _app()
-    app.toggle[0].set_value(False)
-    app.button[0].click().run()
-    labels = {m.label: m.value for m in app.metric}
-    assert labels["Semantic"] == "—", "a dropped channel must not read as 0"
+def test_every_bullet_shows_a_signed_impact():
+    app = built_app()
+    deltas = [m.value for m in app.markdown if m.value.startswith("**:")]
+    assert len(deltas) == 3
+    assert all(("+" in d) or ("-" in d) for d in deltas)
 
 
-def test_app_publishes_the_formula():
-    """The differentiator is that the weights are visible, so they must be."""
-    app = _app()
-    app.toggle[0].set_value(False)
-    app.button[0].click().run()
+def test_an_irrelevant_bullet_is_flagged_as_harmful():
+    """Against a backend job description, an office-social-committee line
+    lowers the score. A grounded scorer can say so; a guessed one cannot."""
+    app = built_app()
+    red = [m.value for m in app.markdown if m.value.startswith("**:red[")]
+    assert red, "expected at least one negative-impact bullet"
+    assert app.warning, "harmful bullets should be surfaced, not buried"
+    assert "lowering" in app.warning[0].value
+
+
+def test_role_archetype_mode_works_without_a_job_description():
+    app = AppTest.from_file(APP, default_timeout=240)
+    app.run()
+    app.sidebar.radio[0].set_value("Paste or upload").run()
+    app.sidebar.radio[1].set_value("Pick a role archetype").run()
+    app.sidebar.text_area[0].set_value(RESUME).run()
+    app.sidebar.button[0].click().run()
+    assert not app.exception, app.exception
+    assert {m.label for m in app.metric} >= {"Score", "Band"}
+
+
+def test_building_with_no_input_reports_an_error_rather_than_crashing():
+    app = AppTest.from_file(APP, default_timeout=120)
+    app.run()
+    app.sidebar.radio[0].set_value("Paste or upload").run()
+    app.sidebar.button[0].click().run()
+    assert not app.exception
+    assert app.error, "an empty build should explain itself"
+
+
+def test_the_formula_is_published_in_the_ui():
+    app = built_app()
     rendered = " ".join(block.value for block in app.code)
+    from rba.ats.fusion import CHANNEL_WEIGHTS
     for name in CHANNEL_WEIGHTS:
         assert name in rendered
