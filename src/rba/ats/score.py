@@ -6,8 +6,9 @@ number can be recomputed and checked by hand.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
+from .calibrate import load_calibration
 from .corpus import background_corpus
 from .dense import cosine_similarity
 from .fusion import ChannelScores, FusedScore, convex_fuse
@@ -30,7 +31,25 @@ class ScoreReport:
 
     @property
     def score_100(self) -> float:
+        """The headline number.
+
+        A percentile against the reference set when one exists, because a raw
+        similarity of 0.63 shown as "63/100" implies a calibration nobody did.
+        """
+        if self.fused.percentile is not None:
+            return round(self.fused.percentile, 1)
         return round(self.fused.raw * 100, 1)
+
+    @property
+    def is_calibrated(self) -> bool:
+        return self.fused.percentile is not None
+
+    @property
+    def scale_note(self) -> str:
+        if self.is_calibrated:
+            return (f"Percentile against {self.fused.reference_size} plausible "
+                    f"resume/job pairs — not an ATS score.")
+        return "Raw fused score, uncalibrated — not an ATS score."
 
     @property
     def band(self) -> str:
@@ -64,7 +83,8 @@ def score_resume_against_jd(resume_text: str, jd_text: str, *,
                             required_skills: list[str] | None = None,
                             preferred_skills: list[str] | None = None,
                             use_dense: bool = True,
-                            corpus: list[str] | None = None) -> ScoreReport:
+                            corpus: list[str] | None = None,
+                            calibrate: bool = True) -> ScoreReport:
     """Score a resume against a job description.
 
     ``resume_skills`` and ``required_skills`` normally come from the LLM
@@ -106,6 +126,20 @@ def score_resume_against_jd(resume_text: str, jd_text: str, *,
     recognised, unrecognised = coverage(resume_skills or [])
     fused = convex_fuse(ChannelScores(dense=dense, lexical=lexical,
                                       skills=skills_score))
+
+    if calibrate:
+        calibration = load_calibration()
+        if not calibration.usable:
+            notes.append("No usable reference set, so the score is the raw "
+                         "fused value rather than a percentile.")
+        elif not calibration.matches(fused.channels):
+            notes.append(
+                "This run used a different set of channels than the reference "
+                "set, so a percentile would not be like-for-like. Showing the "
+                "raw fused score instead.")
+        else:
+            fused = replace(fused, percentile=calibration.percentile(fused.raw),
+                            reference_size=calibration.reference_size)
 
     return ScoreReport(
         fused=fused,

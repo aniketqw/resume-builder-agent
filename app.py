@@ -62,10 +62,16 @@ def main() -> None:
             "documents into structured fields, then fuse several retrieval "
             "views. That approach scored MAP 0.6632 against the winner's "
             "0.7140, with no training.\n\n"
-            "**There is no ground truth for an absolute resume score.** The "
-            "channel weights below are a judgement call. What we can honestly "
-            "offer is that they are *visible*, and that each channel is shown "
-            "separately so you can disagree with the mix."
+            "**There is no ground truth for an absolute resume score.** Proper "
+            "calibration would mean *candidates scoring 80 reach the next stage "
+            "about 80% of the time*, which needs labelled hiring outcomes that "
+            "are not publicly available in English. So the headline number is a "
+            "**percentile against a stated reference set**: true by "
+            "construction, and it puts the uncertainty somewhere you can see "
+            "it.\n\n"
+            "The channel weights below are still a judgement call. What we can "
+            "honestly offer is that they are *visible*, and that each channel "
+            "is shown separately so you can disagree with the mix."
         )
 
     left, right = st.columns(2)
@@ -109,10 +115,15 @@ def main() -> None:
     )
 
     st.divider()
-    headline, band = st.columns([1, 2])
-    headline.metric("Score", f"{report.score_100:.0f}/100")
+    headline, band, scale = st.columns([1, 1, 2])
+    headline.metric(
+        "Percentile" if report.is_calibrated else "Score (raw)",
+        f"{report.score_100:.0f}",
+        help="Share of the reference pairs this scores above."
+             if report.is_calibrated else "Uncalibrated fused similarity.")
     band.metric("Band", report.band,
                 help="Mirrors Greenhouse's Strong/Good/Partial/Limited.")
+    scale.info(report.scale_note)
 
     st.subheader("How that number was reached")
     for line in report.explain():
@@ -142,6 +153,15 @@ def main() -> None:
                    "discounts common words by how often they appear across a "
                    "background corpus of 22 job descriptions.")
         st.write(", ".join(report.missing_terms[:40]))
+
+    with st.expander("The reference set"):
+        from rba.ats.calibrate import load_calibration
+        calibration = load_calibration()
+        st.caption(calibration.description or "No reference set built.")
+        st.caption("Cross-family pairs are excluded deliberately. Including "
+                   "them would make the bar 'better than a random pairing' — "
+                   "an earlier build did exactly that and a mediocre match "
+                   "came out at the 92nd percentile.")
 
     with st.expander("The formula"):
         st.markdown(

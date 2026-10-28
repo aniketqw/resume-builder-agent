@@ -287,3 +287,71 @@ def test_explain_is_human_readable_and_weighted():
 def test_score_stays_within_bounds():
     for text, skills in (("", []), (JD_BACKEND, REQUIRED), ("x" * 5000, [])):
         assert 0.0 <= _score(text, skills).score_100 <= 100.0
+
+
+# -- calibration ----------------------------------------------------------
+def test_calibration_ships_and_is_usable():
+    from rba.ats.calibrate import load_calibration
+    calibration = load_calibration()
+    assert calibration.usable, "a shipped reference set must clear the floor"
+    assert calibration.reference_size >= 30
+
+
+def test_percentile_is_monotonic_in_the_raw_score():
+    from rba.ats.calibrate import build_calibration
+    calibration = build_calibration([i / 100 for i in range(100)])
+    assert (calibration.percentile(0.1) < calibration.percentile(0.5)
+            < calibration.percentile(0.9))
+
+
+def test_percentile_bounds():
+    from rba.ats.calibrate import build_calibration
+    calibration = build_calibration([i / 100 for i in range(100)])
+    assert calibration.percentile(-1.0) == 0.0
+    assert calibration.percentile(2.0) == 100.0
+
+
+def test_a_tiny_reference_set_is_refused_rather_than_trusted():
+    """Below ~30 pairs the quantiles are noise, and a percentile would imply
+    precision that is not there."""
+    from rba.ats.calibrate import build_calibration
+    assert not build_calibration([0.1, 0.5, 0.9]).usable
+
+
+def test_an_empty_reference_set_falls_back_to_the_raw_score():
+    from rba.ats.calibrate import Calibration
+    empty = Calibration(breakpoints=(), reference_size=0)
+    assert empty.percentile(0.42) == pytest.approx(42.0)
+    assert not empty.usable
+
+
+def test_calibrated_report_says_what_the_number_is():
+    """Needs the same channels the reference set used, hence use_dense=True."""
+    from rba.ats import score_resume_against_jd
+    report = score_resume_against_jd(
+        "Python Docker Kubernetes REST APIs.", JD_BACKEND,
+        resume_skills=["Python"], required_skills=REQUIRED, use_dense=True)
+    assert report.is_calibrated
+    assert "not an ATS score" in report.scale_note
+    assert "plausible resume/job pairs" in report.scale_note
+
+
+def test_a_mismatched_channel_set_refuses_to_calibrate():
+    """The reference was built with all three channels. Scoring with one
+    switched off produces systematically lower raw values; comparing those to
+    that reference floored every result at the 0th percentile."""
+    from rba.ats import score_resume_against_jd
+    report = score_resume_against_jd(
+        "Python Docker work.", JD_BACKEND, resume_skills=["Python"],
+        required_skills=REQUIRED, use_dense=False)
+    assert not report.is_calibrated
+    assert any("like-for-like" in note for note in report.notes)
+
+
+def test_calibration_can_be_turned_off():
+    from rba.ats import score_resume_against_jd
+    report = score_resume_against_jd(
+        "Python work.", JD_BACKEND, resume_skills=["Python"],
+        required_skills=REQUIRED, use_dense=False, calibrate=False)
+    assert not report.is_calibrated
+    assert "uncalibrated" in report.scale_note.lower()

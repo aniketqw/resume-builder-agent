@@ -32,7 +32,9 @@ def test_app_scores_without_exception():
     app.button[0].click().run()
     assert not app.exception, app.exception
     labels = {m.label: m.value for m in app.metric}
-    assert "Score" in labels and labels["Score"].endswith("/100")
+    # The headline is a percentile when the reference set matches the channels
+    # used, and a raw score otherwise. Both are valid; neither is "/100 ATS".
+    assert "Percentile" in labels or "Score (raw)" in labels
     assert labels["Band"] in {"Strong match", "Good match",
                               "Partial match", "Limited match"}
 
