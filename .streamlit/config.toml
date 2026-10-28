@@ -1,0 +1,15 @@
+# Streamlit Community Cloud reads this from the REPOSITORY ROOT, even when the
+# entrypoint lives elsewhere.
+[client]
+# The app is public while the source repository is private. A traceback would
+# leak file paths, and potentially fragments of a user-supplied API key, to
+# anyone who can open the URL.
+showErrorDetails = "none"
+
+[server]
+# Resumes are small. The 200MB default is an invitation to exhaust the
+# 690MB memory floor.
+maxUploadSize = 5
+
+[theme]
+base = "light"

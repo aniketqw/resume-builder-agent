@@ -17,6 +17,14 @@ dependencies = [
   "pyyaml>=6.0",
   "python-dotenv>=1.0",
   "aiosqlite>=0.20",
+  # Scoring core. numpy and rank-bm25 are pure/portable; onnxruntime runs the
+  # embedding model WITHOUT torch -- sentence-transformers would pull ~1GB and
+  # blow Streamlit Community Cloud's 690MB guaranteed floor.
+  "numpy>=1.26",
+  "rank-bm25>=0.2.2",
+  "onnxruntime>=1.17",
+  "tokenizers>=0.15",
+  "streamlit>=1.40",
   # MCP is the default GitHub backend, not an optional extra.
   "langchain[mcp]>=1.0",
 ]

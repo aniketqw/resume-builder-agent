@@ -20,30 +20,65 @@ These were found while reading your repositories. Fix these first.
 
 | Role | ATS score | Keywords | Role fit | Numbers | Recoverable |
 |---|---:|---:|---:|---:|---:|
-| Software Engineer | **59.1** | 32.0 | 14.31 | 0.0 | +10.67 |
-| Backend / Platform Engineer | **43.02** | 19.4 | 10.97 | 0.0 | +10.88 |
-| AI / LLM Agent Engineer | **35.75** | 13.25 | 9.8 | 0.0 | +11.66 |
-| Data Scientist | **20.15** | 2.56 | 4.9 | 0.0 | +11.77 |
-| Machine Learning Engineer | **15.17** | 0.98 | 1.89 | 0.0 | +12.71 |
+| Data Scientist | **52.67** | 27.12 | 14.37 | 0.0 | +9.72 |
+| Software Engineer | **38.42** | 15.33 | 10.04 | 0.59 | +13.33 |
+| AI / LLM Agent Engineer | **34.06** | 12.19 | 9.27 | 0.0 | +11.66 |
+| Backend / Platform Engineer | **32.25** | 10.88 | 9.0 | 0.0 | +10.88 |
+| Machine Learning Engineer | **25.88** | 6.36 | 7.08 | 0.0 | +12.22 |
 
-Best fit: **balanced** (spread across roles: 43.93 points).
+Best fit: **data_scientist** (spread across roles: 26.79 points).
 
 
-## Resume — ai_llm_agent_engineer (35.75/100)
+## Resume — ai_llm_agent_engineer (34.06/100)
 
 **AI / LLM Agent Engineer – Agentic LLM Systems with Evaluation and Guardrails**
 
-Designed and implemented a LangChain ReAct Agent that orchestrates tool‑calling and data retrieval using Ollama and MongoDB. Built dynamic and static web scrapers, PDF extraction pipelines, and MongoDB helpers to ingest and search documents for downstream LLM processing. Developed a minimalist file upload service and a GitHub repository analyzer to support data ingestion and natural language search.
+Designed and implemented agentic LLM systems using LangChain ReAct and MongoDB, integrating static and dynamic web scraping, PDF extraction, and tool‑calling workflows. Built AI‑powered natural language search for GitHub repositories, delivering analytics and export capabilities. Developed robust data ingestion pipelines and structured output handling for LLM applications.
 
 ### Projects
 
-- Implemented a LangChain ReAct Agent that delegates work to underlying functions, enabling tool‑calling and retrieval from MongoDB.
-- Built a static web scraper using requests and BeautifulSoup to collect structured data for LLM ingestion.
+- Implemented a LangChain ReAct Agent with Ollama and MongoDB to orchestrate tool‑calling workflows.
+- Built a static web scraper using requests and BeautifulSoup to provide structured data for LLM inputs.
 - Developed a dynamic web scraper with Playwright for real‑time data extraction.
-- Created a PDF extractor converting PDFs to text via pypdf, pymupdf, and OCR for LLM input.
-- Provided MongoDB helpers for inserting and searching documents to support retrieval‑augmented generation.
-- Implemented a minimalist Node.js/Express file upload system with a web interface, storing files with original filenames and allowing direct download.
-- Built a GitHub repository analyzer offering AI‑powered natural language search, detailed analytics, and export to JSON/CSV.
+- Created a PDF extractor converting PDFs to text via pypdf, pymupdf, and OCR for LLM ingestion.
+- Implemented MongoDB helpers for inserting and searching documents to support LLM retrieval.
+- Designed an AI‑powered natural language search for GitHub repositories, supporting URL‑based and natural language modes.
+- Delivered detailed analytics including stats, contributors, language breakdown, commits, and issues for repositories.
+- Enabled export of analysis results as JSON or CSV for downstream processing.
+
+### Skills
+
+- LangChain
+- Ollama
+- MongoDB
+- requests
+- BeautifulSoup
+- Playwright
+- pypdf
+- pymupdf
+- OCR
+- Docker Compose
+- Node.js
+- Express
+- Multer
+
+
+## Resume — ml_engineer (25.88/100)
+
+**Machine Learning Engineer – Model Training, Evaluation, and Deployment**
+
+Implemented and maintained machine learning pipelines for natural language and web‑scraping tasks, leveraging LangChain, Ollama, and MongoDB. Built data extraction utilities and web scrapers using requests, BeautifulSoup, Playwright, and OCR libraries. Developed backend services for file handling and AI‑powered repository analysis with Docker Compose.
+
+### Projects
+
+- Implemented a LangChain ReAct Agent with Ollama and MongoDB to orchestrate tool calls for AI tasks.
+- Built a static web scraper using requests and BeautifulSoup for data extraction.
+- Developed a dynamic web scraper with Playwright for interactive content retrieval.
+- Created a PDF extractor converting PDFs to text via pypdf, pymupdf, and OCR.
+- Provided MongoDB helpers for inserting and searching documents in the agent workflow.
+- Constructed a minimalist file upload system with Node.js and Express, offering web interface, file listing, and download capabilities.
+- Built a Docker Compose‑based backend and frontend for the local lending application.
+- Developed an AI‑powered natural language search for GitHub repositories, supporting URL and natural language queries, and delivering analytics in JSON or CSV.
 
 ### Skills
 
@@ -59,256 +94,179 @@ Designed and implemented a LangChain ReAct Agent that orchestrates tool‑callin
 - Node.js
 - Express
 - Docker Compose
-- Python
-- JavaScript
 
 
-## Resume — ml_engineer (15.17/100)
-
-**Machine Learning Engineer**
-
-Built and maintained data pipelines and web interfaces for data ingestion and analysis. Developed tools for document extraction and natural language search across code repositories. Engineered real‑time sensor processing and flight state classification for aircraft protection systems.
-
-### Projects
-
-- Implemented a static web scraper using requests and BeautifulSoup to collect data from web pages.
-- Implemented a dynamic web scraper using Playwright for interactive content extraction.
-- Built a PDF extractor converting PDFs to text via pypdf, pymupdf, and OCR.
-- Developed a minimalist file upload system with Node.js and Express, providing a web interface for uploading, listing, and downloading files.
-- Created a multi‑threaded C pipeline for AoA protection, parsing UART frames, validating sensor data, estimating AoA with weighted fusion and a Kalman filter, and controlling elevator deflection.
-- Implemented a finite‑state machine driven by CSV‑defined thresholds to classify flight states and log transitions to fault_log.csv.
-- Built an AI‑powered natural language search for GitHub repositories, supporting URL‑based and natural language modes, and delivering analytics in JSON or CSV.
-
-### Skills
-
-- Python
-- requests
-- BeautifulSoup
-- Playwright
-- pypdf
-- pymupdf
-- OCR
-- Node.js
-- Express
-- Multer
-- Docker Compose
-- C
-- UART
-- Kalman filter
-- CSV
-- JSON
-- CSV
-- GitHub API
-
-
-## Resume — backend_platform_engineer (43.02/100)
+## Resume — backend_platform_engineer (32.25/100)
 
 **Backend / Platform Engineer – Service & Infrastructure Builder**
 
-Engineered lightweight backend services and orchestrated containerized deployments using Docker Compose. Built RESTful interfaces for file handling and AI‑powered search, integrating MongoDB, PostgreSQL, and Redis for data persistence and caching.
+Engineered and maintained backend services and infrastructure, focusing on API design, containerization, and data persistence. Delivered microservices with Docker, managed data with MongoDB and PostgreSQL, and implemented robust logging and monitoring solutions.
 
 ### Projects
 
-- Implemented a minimalist file upload system with Node.js and Express, providing a web interface for uploading, listing, and downloading files, with configurable size limits via Multer.
-- Built a PDF extractor converting PDFs to text using pypdf, pymupdf, and OCR, and integrated MongoDB helpers for document insertion and search.
-- Developed an AI‑powered natural language search for GitHub repositories, delivering analytics and exportable results in JSON or CSV.
-- Created a LangChain ReAct Agent using Ollama and MongoDB, delegating tool calls to underlying functions.
-- Orchestrated backend and frontend services with Docker Compose for rapid local deployment.
-- Implemented a multi‑threaded C pipeline for AoA protection, parsing UART frames, filtering sensor data, estimating AoA with Kalman filtering, and controlling flight state transitions via a finite‑state machine.
-- Designed a dynamic web scraper using Playwright and a static scraper with requests and BeautifulSoup for data extraction.
-- Implemented a multi‑threaded C pipeline for AoA protection, parsing UART frames, filtering sensor data, estimating AoA with Kalman filtering, and controlling flight state transitions via a finite‑state machine.
+- Implemented a multi-threaded C pipeline for AoA protection, parsing UART frames and validating sensor data using median filtering and outlier rejection.
+- Designed and executed a finite‑state machine driven by CSV‑defined thresholds to classify flight states and control elevator deflection for AoA mitigation.
+- Built a minimalist file upload system with Node.js and Express, providing a web interface for uploading, listing, and downloading files, with configurable size limits via Multer.
+- Developed a dynamic web scraper using Playwright and a static scraper with requests and BeautifulSoup, integrating PDF extraction via pypdf, pymupdf, and OCR.
+- Created an AI-powered natural language search for GitHub repositories, delivering analytics and exportable results in JSON or CSV formats.
+- Integrated MongoDB helpers for inserting and searching documents in an agent-based system using LangChain ReAct Agent with Ollama.
+- Started and built backend and frontend services with Docker Compose, enabling consistent local development environments.
 
 ### Skills
 
+- C
 - Node.js
 - Express
-- Docker Compose
-- MongoDB
-- PostgreSQL
-- Redis
 - Python
-- FastAPI
-- Spring
-- REST
-- Kafka
-- CI/CD
 - Playwright
 - BeautifulSoup
+- requests
 - pypdf
 - pymupdf
 - OCR
-- LangChain
-- Ollama
+- MongoDB
+- Docker Compose
+- Docker
+- GitHub
+- JSON
+- CSV
 
 
-## Resume — data_scientist (20.15/100)
+## Resume — data_scientist (52.67/100)
 
 **Data Scientist – Turning Data into Measured Answers**
 
-Built and maintained data extraction pipelines that transform unstructured web and PDF content into structured datasets for analysis. Leveraged MongoDB for efficient storage and retrieval, and integrated OCR and natural language processing to enrich data quality. Delivered tools that support downstream statistical analysis and machine‑learning workflows.
+Built and deployed data pipelines that extract, transform, and analyze information from web sources and code repositories. Delivered AI‑powered search and analytics tools that provide actionable insights in JSON and CSV formats.
 
 ### Projects
 
-- Implemented a static web scraper using requests and BeautifulSoup to collect structured data from websites.
-- Developed a dynamic web scraper with Playwright to capture interactive content for analysis.
-- Created a PDF extractor converting documents to text via pypdf, pymupdf, and OCR, enabling text‑based analytics.
-- Built MongoDB helpers for inserting and searching documents, streamlining data ingestion and retrieval.
-- Designed a minimalist file upload system with Node.js and Express, providing a web interface for data ingestion and storage.
-- Implemented a multi‑threaded C pipeline for AoA protection, parsing UART frames and applying median filtering and outlier rejection to validate sensor data.
-- Estimated AoA using weighted fusion and a Kalman filter, and classified flight states via a finite‑state machine driven by CSV‑defined thresholds.
-- Logged state transitions and sensor faults to fault_log.csv, facilitating audit and debugging.
-- Provided AI‑powered natural language search for GitHub repositories, delivering analytics such as stats, contributors, language breakdown, commits, and issues.
+- Implemented a dynamic web scraper using Playwright to collect structured data for downstream analysis.
+- Developed a PDF extractor converting documents to text via pypdf, pymupdf, and OCR for data ingestion.
+- Created MongoDB helper functions to insert and search documents, enabling efficient data retrieval.
+- Built an AI‑powered natural language search engine for GitHub repositories, delivering detailed analytics such as contributor stats, language breakdown, commits, and issues.
+- Exported analysis results as JSON or CSV, facilitating integration with downstream data science workflows.
 
 ### Skills
 
-- LangChain
-- Ollama
-- MongoDB
-- requests
-- BeautifulSoup
+- Python
 - Playwright
+- BeautifulSoup
+- requests
 - pypdf
 - pymupdf
 - OCR
-- Node.js
-- Express
-- Multer
-- Docker Compose
-- C
-- UART
-- Kalman filter
-- CSV
-- JSON
-- CSV export
+- MongoDB
+- LangChain
+- Ollama
+- Jupyter
+- pandas
+- numpy
+- SQL
+- data visualization
+- regression
+- classification
+- clustering
+- hypothesis testing
+- A/B testing
+- experiment design
 
 
-## Resume — balanced (59.1/100)
+## Resume — balanced (38.42/100)
 
 **Software Engineer – Generalist across services, data, and ML**
 
-Built and maintained a variety of web and backend services, including a file upload system and AI‑powered repository analyzer. Developed web scrapers, PDF extraction utilities, and a LangChain ReAct agent with MongoDB integration. Designed and deployed Docker‑based multi‑service stacks and implemented real‑time data processing pipelines.
+Implemented multi‑threaded C pipelines for AoA protection, built web‑scraping utilities in Python, and developed a Node.js file upload server. Designed and deployed Docker‑based services, integrated MongoDB helpers, and engineered AI‑powered GitHub repository analytics.
 
 ### Projects
 
-- Implemented a minimalist file upload system with Node.js and Express, providing a web interface for uploading, listing, and downloading files, with configurable size limits via Multer.
-- Built a static web scraper using requests and BeautifulSoup, and a dynamic scraper using Playwright, to collect data from web pages.
-- Developed a PDF extractor converting PDFs to text using pypdf, pymupdf, and OCR.
-- Created a LangChain ReAct Agent with Ollama and MongoDB, delegating tool calls to underlying functions and providing MongoDB helpers for document insertion and search.
-- Designed a Docker Compose stack to start and build both backend and frontend services for a lending application.
-- Implemented a multi‑threaded C pipeline for AoA protection, parsing UART frames, filtering sensor data, estimating AoA with Kalman filtering, and controlling elevator deflection.
-- Built an AI‑powered natural language search tool for GitHub repositories, supporting URL‑based and natural language queries, delivering analytics and exporting results as JSON or CSV.
+- Implemented a multi‑threaded C pipeline for AoA protection
+- Parsed UART frames and validated sensor data using median filtering and outlier rejection
+- Estimated AoA with weighted fusion and a Kalman filter
+- Ran a finite‑state machine driven by CSV‑defined thresholds to classify flight states
+- Controlled elevator deflection to mitigate excessive AoA in protection mode
+- Logged state transitions and sensor faults to fault_log.csv
+- Used LangChain ReAct Agent with Ollama and MongoDB
+- Provided a static web scraper using requests and BeautifulSoup
+- Provided a dynamic web scraper using Playwright
+- Provided a PDF extractor converting PDFs to text via pypdf, pymupdf, and OCR
+- Included MongoDB helpers for inserting and searching documents
+- Built a minimalist file upload system with Node.js and Express for FreeBSD
+- Provided a simple web‑based file upload interface
+- Stored uploaded files with original filenames
+- Listed uploaded files with size and upload date
+- Enabled direct file download from the interface
+- Configured default maximum upload size of 10 MB via Multer limits
+- Started and built backend with Docker Compose
+- Started and built frontend with Docker Compose
+- Provided AI‑powered natural language search for GitHub repositories
+- Supported URL‑based and natural language search modes
+- Delivered detailed analytics including stats, contributors, language breakdown, commits, and issues
+- Allowed exporting analysis results as JSON or CSV
 
 ### Skills
 
+- C
+- Python
 - Node.js
 - Express
-- Python
+- JavaScript
+- Docker Compose
+- MongoDB
+- LangChain
+- Ollama
 - requests
 - BeautifulSoup
 - Playwright
 - pypdf
 - pymupdf
 - OCR
-- LangChain
-- Ollama
-- MongoDB
-- Docker Compose
-- C
-- UART
-- Kalman filter
-- JavaScript
-- SQL
-- API design
-- CI/CD
-- Testing
-- Debugging
-- Documentation
-- Machine learning
+- Multer
+- GitHub API
 
 
 ## Improvement plan
 
-10 steps, ~67 hours, +34.5 ATS points if all are completed.
+5 steps, ~40 hours, +16.9 ATS points if all are completed.
 
-### 1. Add a PyTorch image classification model to AiAgentDemo  
-*12h · +5.94 ATS · role: ml_engineer · repo: `AiAgentDemo`*
+### 1. Add Data Science Notebook to AiAgentDemo  
+*12h · +7.23 ATS · role: data_scientist · repo: `AiAgentDemo`*
 
-- **Gap:** Cannot evidence PyTorch, training, fine‑tuning, computer‑vision, model, dataset, benchmark, evaluation
-- **Evidence found:** AiAgentDemo (existing web‑scraping and PDF extraction utilities)
-- **Action:** Create a new submodule in AiAgentDemo that downloads a small public image dataset (e.g., CIFAR‑10), defines a simple CNN in PyTorch, trains it for 5 epochs, fine‑tunes the last layer, and saves the model artifact; add a script `benchmark.py` that runs inference on a held‑out set and prints p50/p95 latency and top‑1 accuracy.
-- **Done when:** A committed `train_cnn.py` and `benchmark.py` in AiAgentDemo, a saved `model.pt` file, and console output showing latency and accuracy metrics
+- **Gap:** Cannot evidence statistics, visualisation, dataset, notebook, correlation, feature, matplotlib, seaborn, metric, r
+- **Evidence found:** AiAgentDemo (Python web‑scraping and PDF extraction)
+- **Action:** Create a Jupyter notebook (notebook.ipynb) in the AiAgentDemo repository that loads a public dataset (e.g., UCI Wine), performs descriptive statistics, computes correlation matrix, engineers at least two new features, visualises distributions and relationships with matplotlib and seaborn, and records a simple model’s evaluation metric (e.g., accuracy).
+- **Done when:** notebook.ipynb committed to AiAgentDemo with executed cells, plots saved as PNG, and a markdown summary of statistics and metrics.
 
-### 2. Document a computer‑vision pipeline in AiAgentDemo README  
-*3h · +5.78 ATS · role: ml_engineer · repo: `AiAgentDemo`*
+### 2. Create R Analysis Demo Repository  
+*10h · +3.95 ATS · role: data_scientist · new work*
 
-- **Gap:** Cannot evidence computer‑vision, dataset, evaluation description
-- **Evidence found:** AiAgentDemo (new CV pipeline from steps 1‑3)
-- **Action:** Expand the README to include a section describing the end‑to‑end computer‑vision workflow: data acquisition via web scraper, preprocessing, model training (PyTorch), conversion to TensorFlow, inference API, and benchmark results; add code snippets and usage instructions.
-- **Done when:** Updated README with a fully populated CV pipeline section and a link to the benchmark report
-
-### 3. Add a Dockerfile and CI pipeline for reproducible ML builds  
-*5h · +3.86 ATS · role: ml_engineer · repo: `AiAgentDemo`*
-
-- **Gap:** Cannot evidence deployment of ML models, reproducibility, numbers (build time)
-- **Evidence found:** AiAgentDemo (existing Python project) and locallend (Docker Compose usage)
-- **Action:** Write a multi‑stage Dockerfile that installs PyTorch, TensorFlow, and runs the training script; add a GitHub Actions workflow that builds the image, runs the benchmark suite, and uploads the model artifact as a release asset.
-- **Done when:** Dockerfile in the repo, a GitHub Actions badge showing successful builds, and a released model artifact
-
-### 4. Create a benchmark suite for model evaluation in AiAgentDemo  
-*6h · +3.86 ATS · role: ml_engineer · repo: `AiAgentDemo`*
-
-- **Gap:** Cannot evidence benchmark, evaluation, numbers
-- **Evidence found:** AiAgentDemo (new training scripts from step 1)
-- **Action:** Add a `benchmark_suite/` directory containing pytest‑compatible benchmarks that measure training time per epoch, inference latency (p50/p95), and accuracy on the test split; integrate results into a markdown report generated by a CI workflow.
-- **Done when:** A `benchmark_report.md` committed to the repo with recorded metrics and a passing CI badge
-
-### 5. Add CI/CD Automation for Tests and Docker Builds  
-*10h · +3.53 ATS · role: balanced · new work*
-
-- **Gap:** automation
+- **Gap:** Missing evidence of R language and related visualisation (ggplot2) for keyword ‘r’
 - **Evidence found:** none
-- **Action:** Create a new repository named ai-agent-ci containing a GitHub Actions workflow that runs unit tests, lints the code, and builds a Docker image for AiAgentDemo on each push; include a badge in AiAgentDemo README.
-- **Done when:** GitHub Actions workflow file (.github/workflows/ci.yml) in ai-agent-ci and status badge visible in AiAgentDemo README
+- **Action:** Initialize a new repository named r-analysis-demo, add an R script (analysis.R) that loads the same dataset, performs summary statistics, computes correlations, creates at least two ggplot2 visualisations, and saves plots as PNG files.
+- **Done when:** analysis.R, summary.txt, and plot PNG files committed to r-analysis-demo.
 
-### 6. Integrate TensorFlow inference endpoint into AiAgentDemo  
-*8h · +3.05 ATS · role: ml_engineer · repo: `AiAgentDemo`*
+### 3. Update AiAgentDemo README with Data Science Section  
+*4h · +2.63 ATS · role: data_scientist · repo: `AiAgentDemo`*
 
-- **Gap:** Cannot evidence TensorFlow, inference, model
-- **Evidence found:** AiAgentDemo (existing tool‑calling framework)
-- **Action:** Convert the trained PyTorch model to ONNX, then load it with TensorFlow‑Serving in a new FastAPI route ` /infer`; expose the endpoint so the ReAct agent can request image classification predictions.
-- **Done when:** A new FastAPI route in AiAgentDemo that returns classification results, with a README showing how to start TensorFlow‑Serving and a successful curl example
+- **Gap:** Resume sections lack explicit data‑science artefacts
+- **Evidence found:** AiAgentDemo (existing README with web‑scraping description)
+- **Action:** Edit the README.md to add a “Data Science Projects” section linking to notebook.ipynb, features.py, evaluate_model.py and summarising the statistical and visualisation work.
+- **Done when:** README.md updated and pushed, showing the new section with hyperlinks.
 
-### 7. Add System Architecture Diagram and Docs to AiAgentDemo  
-*6h · +2.82 ATS · role: balanced · repo: `AiAgentDemo`*
+### 4. Add Model Metric Reporting Script  
+*6h · +1.97 ATS · role: data_scientist · repo: `AiAgentDemo`*
 
-- **Gap:** architecture
-- **Evidence found:** AiAgentDemo
-- **Action:** Create a docs/architecture.md file in the AiAgentDemo repository containing a high‑level component diagram (agent, tool wrappers, MongoDB, web UI) and a description of data flow; add a generated diagram image using Mermaid and reference it in the README.
-- **Done when:** architecture.md with diagram committed to AiAgentDemo and linked from README
+- **Gap:** No demonstrated metric calculation or reporting
+- **Evidence found:** AiAgentDemo (existing Python utilities)
+- **Action:** Create a script (evaluate_model.py) that trains a simple classifier/regressor on the same dataset, computes relevant metrics (e.g., RMSE, F1‑score), and writes a JSON report (metrics.json).
+- **Done when:** evaluate_model.py and generated metrics.json committed to the repo.
 
-### 8. Document LLM Integration and Prompt Engineering  
-*5h · +2.12 ATS · role: balanced · repo: `AiAgentDemo`*
+### 5. Implement Feature‑Engineering Module  
+*8h · +1.1 ATS · role: data_scientist · repo: `AiAgentDemo`*
 
-- **Gap:** llm
-- **Evidence found:** AiAgentDemo
-- **Action:** Write a detailed guide (docs/llm_integration.md) explaining the LangChain ReAct setup, Ollama model selection, prompt templates, and how the agent decides tool usage; include example prompts and token usage statistics.
-- **Done when:** llm_integration.md added to AiAgentDemo and linked from README
-
-### 9. Implement Performance Benchmarks for Tool Calls  
-*8h · +2.12 ATS · role: balanced · repo: `AiAgentDemo`*
-
-- **Gap:** performance
-- **Evidence found:** AiAgentDemo
-- **Action:** Add a benchmark script (benchmarks/performance_test.py) that measures latency and throughput of the ReAct agent’s tool selection and execution (web scraper, PDF extractor, MongoDB ops) over 100 runs, outputting p50/p95 timings to a CSV.
-- **Done when:** performance_test.py script with CSV results committed to AiAgentDemo
-
-### 10. Introduce Git Contribution Guidelines and Changelog  
-*4h · +1.41 ATS · role: balanced · new work*
-
-- **Gap:** git
-- **Evidence found:** none
-- **Action:** Create a repository named contribution-guidelines containing CONTRIBUTING.md (branch naming, commit message format, PR template) and a CHANGELOG.md template; add links to these files from each existing repo's README.
-- **Done when:** CONTRIBUTING.md and CHANGELOG.md files in contribution-guidelines repo and referenced in all project READMEs
+- **Gap:** Missing evidence of feature creation and statistical processing
+- **Evidence found:** AiAgentDemo (Python code base)
+- **Action:** Add a Python module (features.py) that defines functions for cleaning, scaling, and generating new features from a DataFrame; include unit tests (test_features.py) covering at least three cases.
+- **Done when:** features.py and test_features.py committed, with 100% test pass shown in CI badge or local run output.
 
 
 ## Measure these
@@ -345,6 +303,24 @@ The model proposed these; the evidence did not support them. They are listed so 
 
 
 ## Evidence index
+
+
+### AOA_Controller_ty
+
+AoA Controller is a multi-threaded C pipeline that protects aircraft from excessive angle‑of‑attack by parsing UART frames, validating sensor data, estimating AoA, and driving elevator commands, warnings, and fault logging.
+
+- Implements a multi-threaded C pipeline for AoA protection.
+  - `README.md`: "Angle-of-Attack (AoA) protection system for embedded flight control, implemented as a multi-threaded C pipeline."
+- Parses UART frames and validates sensor data using median filtering and outlier rejection.
+  - `README.md`: "UART_FrameParser       │  sem_post(frame_ready_sem)       ▼ SensorValidator        ← median filter, outlier rejection, confidence score"
+- Estimates AoA with weighted fusion and a Kalman filter.
+  - `README.md`: "AoA_Estimator          ← weighted fusion + Kalman filter"
+- Runs a finite‑state machine driven by CSV‑defined thresholds to classify flight states.
+  - `README.md`: "FlightControlFSM       ← CSV thresholds → NORMAL / WARNING / PROTECTION"
+- Controls elevator deflection to mitigate excessive AoA in protection mode.
+  - `README.md`: "ElevatorCmdManager   ← corrective deflection in PROTECTION mode"
+- Logs state transitions and sensor faults to fault_log.csv.
+  - `README.md`: "FaultLogger          ← logs state transitions + sensor faults"
 
 
 ### AiAgentDemo
@@ -393,24 +369,6 @@ LocalLend is a full‑stack web application that lets users list, browse, and bo
   - `README.md`: "start and build the frontend using  docker compose up --build -d (from the locallend-frontend directory)"
 
 
-### AOA_Controller_ty
-
-AoA Controller is a multi-threaded C pipeline that protects aircraft from excessive angle‑of‑attack by parsing UART frames, validating sensor data, estimating AoA, and driving elevator commands, warnings, and fault logging.
-
-- Implements a multi-threaded C pipeline for AoA protection.
-  - `README.md`: "Angle-of-Attack (AoA) protection system for embedded flight control, implemented as a multi-threaded C pipeline."
-- Parses UART frames and validates sensor data using median filtering and outlier rejection.
-  - `README.md`: "UART_FrameParser       │  sem_post(frame_ready_sem)       ▼ SensorValidator        ← median filter, outlier rejection, confidence score"
-- Estimates AoA with weighted fusion and a Kalman filter.
-  - `README.md`: "AoA_Estimator          ← weighted fusion + Kalman filter"
-- Runs a finite‑state machine driven by CSV‑defined thresholds to classify flight states.
-  - `README.md`: "FlightControlFSM       ← CSV thresholds → NORMAL / WARNING / PROTECTION"
-- Controls elevator deflection to mitigate excessive AoA in protection mode.
-  - `README.md`: "ElevatorCmdManager   ← corrective deflection in PROTECTION mode"
-- Logs state transitions and sensor faults to fault_log.csv.
-  - `README.md`: "FaultLogger          ← logs state transitions + sensor faults"
-
-
 ### GithubRepoAnalyzer
 
 GitHubRepoAnalyzer is a React application that analyzes GitHub repositories using AI-powered natural language search and provides comprehensive analytics.
@@ -429,24 +387,6 @@ GitHubRepoAnalyzer is a React application that analyzes GitHub repositories usin
   - `README.md`: "Public API Mode: 60 requests per hour (no authentication required) - Private API Mode: 5,000 requests per hour (requires GitHub personal access token)"
 
 
-### next-express-ejs-crud
-
-A starter that runs a Next.js frontend and an Express + EJS backend side‑by‑side to demonstrate CRUD operations.
-
-- Provides a backend that serves both EJS‑rendered pages and a JSON API.
-  - `README.md`: "Backend: Express + EJS (server-rendered pages at http://localhost:4000) and a JSON API under /api."
-- Runs a Next.js frontend that consumes the Express JSON API.
-  - `README.md`: "Frontend: Next.js (at http://localhost:3000) that calls the API."
-- Rewrites /api/* requests in Next.js to the Express API on port 4000.
-  - `README.md`: "next.config.js rewrites /api/* to http://localhost:4000/api/* in development/production."
-- Wraps fetch in the frontend to use an absolute URL that works during server‑side rendering.
-  - `README.md`: "web/lib/api.js wraps fetch. On the server it uses an absolute URL based on NEXT_ORIGIN so SSR fetches hit Next first and are rewritten to the API."
-- Provides a Dockerfile that builds and runs both the Next.js and Express apps in a single container.
-  - `README.md`: "This repo includes a single Dockerfile that builds both apps and runs them in one container (ports 3000 for Next, 4000 for Express)."
-- Implements a JSON API with CRUD routes for posts.
-  - `README.md`: "API Routes (JSON) - GET /api/posts — list all posts"
-
-
 ### spring-gemini-chat
 
 Spring Gemini Chat is a reactive Spring Boot application that provides real‑time chat powered by Google Gemini AI.
@@ -463,6 +403,24 @@ Spring Gemini Chat is a reactive Spring Boot application that provides real‑ti
   - `README.md`: "Built-in health checks and status indicators"
 - Support for contextual conversations
   - `README.md`: "Support for contextual conversations"
+
+
+### next-express-ejs-crud
+
+A starter that runs a Next.js frontend and an Express + EJS backend side‑by‑side to demonstrate CRUD operations.
+
+- Provides a backend that serves both EJS‑rendered pages and a JSON API.
+  - `README.md`: "Backend: Express + EJS (server-rendered pages at http://localhost:4000) and a JSON API under /api."
+- Runs a Next.js frontend that consumes the Express JSON API.
+  - `README.md`: "Frontend: Next.js (at http://localhost:3000) that calls the API."
+- Rewrites /api/* requests in Next.js to the Express API on port 4000.
+  - `README.md`: "next.config.js rewrites /api/* to http://localhost:4000/api/* in development/production."
+- Wraps fetch in the frontend to use an absolute URL that works during server‑side rendering.
+  - `README.md`: "web/lib/api.js wraps fetch. On the server it uses an absolute URL based on NEXT_ORIGIN so SSR fetches hit Next first and are rewritten to the API."
+- Provides a Dockerfile that builds and runs both the Next.js and Express apps in a single container.
+  - `README.md`: "This repo includes a single Dockerfile that builds both apps and runs them in one container (ports 3000 for Next, 4000 for Express)."
+- Implements a JSON API with CRUD routes for posts.
+  - `README.md`: "API Routes (JSON) - GET /api/posts — list all posts"
 
 
 ### nextjs-express-crud-hf
@@ -517,24 +475,6 @@ Chronos Model Improvement implements a distance‑aware enhancement to the Chron
   - `README.md`: "Win Rate: Distance-Aware wins 739/1484 series (49.8%)"
 
 
-### pehenava-backend
-
-Pehenava Backend is a Node.js/Express application that connects to MongoDB to provide API services for the Pehenava project.
-
-- The repository implements a Node.js/Express backend that integrates with MongoDB.
-  - `README.md`: "A Node.js/Express backend application with MongoDB integration for the Pehenava project."
-- It supports a local setup where dependencies are installed via npm.
-  - `README.md`: "When running without Docker, **all dependencies will be installed locally** on your machine."
-- It also supports a Dockerized deployment that containers all dependencies.
-  - `README.md`: "When running with Docker, **all dependencies are containerized** - nothing is installed on your local machine except Docker itself."
-- The README provides a Docker command to run a MongoDB container for the backend.
-  - `README.md`: "docker run -d \   --name pehenava-mongo \   -p 27017:27017 \   mongo:latest"
-- Docker Compose is recommended to manage both the application and MongoDB containers together.
-  - `README.md`: "docker-compose up -d"
-- The application starts an Express server listening on port 3000.
-  - `README.md`: "Server running on port 3000"
-
-
 ### websocket_mcqs1
 
 A MERN‑stack application that lets users create multiple‑choice questions and play against each other with real‑time score updates.
@@ -551,6 +491,42 @@ A MERN‑stack application that lets users create multiple‑choice questions an
   - `README.md`: "observe their score in realtime"
 - Users can create MCQs and play against each other.
   - `README.md`: "create MCQs and play against each other"
+
+
+### aniketqw.github.io
+
+Aniket Saxena’s personal portfolio site and admin dashboard built with a custom design system.
+
+- Implemented a custom design system for the portfolio.
+  - `README.md`: "A design system distilled from the personal portfolio of **Aniket Saxena** — AI Engineer & Full-Stack Developer"
+- Built both a public portfolio site and a private admin dashboard.
+  - `README.md`: "Two surfaces are represented: the public **Portfolio** site and the private **Admin** (repo manager) tool."
+- Styled the admin dashboard with distinct typography and color accents.
+  - `README.md`: "Admin uses **Title Case with lowercase helper copy** and ALL-CAPS 10–12px uppercase labels with 1–3px letter-spacing."
+- Implemented a Python script to fetch and filter GitHub repositories.
+  - `README.md`: "Add fetch_repos.py to retrieve and filter GitHub repos"
+- Added a dynamic projects section that loads data from GitHub.
+  - `README.md`: "Add projects section with dynamic project loading"
+- Documented design tokens and UI kits for reuse across the site.
+  - `README.md`: "Add design system assets and documentation - colors, typography, components, and UI kits"
+
+
+### pehenava-backend
+
+Pehenava Backend is a Node.js/Express application that connects to MongoDB to provide API services for the Pehenava project.
+
+- The repository implements a Node.js/Express backend that integrates with MongoDB.
+  - `README.md`: "A Node.js/Express backend application with MongoDB integration for the Pehenava project."
+- It supports a local setup where dependencies are installed via npm.
+  - `README.md`: "When running without Docker, **all dependencies will be installed locally** on your machine."
+- It also supports a Dockerized deployment that containers all dependencies.
+  - `README.md`: "When running with Docker, **all dependencies are containerized** - nothing is installed on your local machine except Docker itself."
+- The README provides a Docker command to run a MongoDB container for the backend.
+  - `README.md`: "docker run -d \   --name pehenava-mongo \   -p 27017:27017 \   mongo:latest"
+- Docker Compose is recommended to manage both the application and MongoDB containers together.
+  - `README.md`: "docker-compose up -d"
+- The application starts an Express server listening on port 3000.
+  - `README.md`: "Server running on port 3000"
 
 
 ### AiTerminal
@@ -581,24 +557,6 @@ A web‑based tool that lets users search and filter Indian tenders using a Grad
   - `README.md`: "Technologies Used - Python - Gradio - Langchain - BeautifulSoup - Requests - Pandas"
 - Runs the application via a Python script that starts the Gradio server.
   - `README.md`: "Run the application:    ```    python main.py    ```"
-
-
-### aniketqw.github.io
-
-Aniket Saxena’s personal portfolio site and admin dashboard built with a custom design system.
-
-- Implemented a custom design system for the portfolio.
-  - `README.md`: "A design system distilled from the personal portfolio of **Aniket Saxena** — AI Engineer & Full-Stack Developer"
-- Built both a public portfolio site and a private admin dashboard.
-  - `README.md`: "Two surfaces are represented: the public **Portfolio** site and the private **Admin** (repo manager) tool."
-- Styled the admin dashboard with distinct typography and color accents.
-  - `README.md`: "Admin uses **Title Case with lowercase helper copy** and ALL-CAPS 10–12px uppercase labels with 1–3px letter-spacing."
-- Implemented a Python script to fetch and filter GitHub repositories.
-  - `README.md`: "Add fetch_repos.py to retrieve and filter GitHub repos"
-- Added a dynamic projects section that loads data from GitHub.
-  - `README.md`: "Add projects section with dynamic project loading"
-- Documented design tokens and UI kits for reuse across the site.
-  - `README.md`: "Add design system assets and documentation - colors, typography, components, and UI kits"
 
 
 ### Rule-BasedCustomKafkaPartitioner
@@ -667,6 +625,6 @@ A simple WebSocket-based chat application built with Node.js.
 
 ## Run cost
 
-- Groq: 13488 tokens across 3 calls
+- Groq: 11359 tokens across 3 calls
 - Cache hit rate: 100%
-- Wall clock: 2523s
+- Wall clock: 2779s

@@ -28,3 +28,6 @@ fixtures/repos/
 
 # Space deploy artefacts
 space-health.json
+
+# Streamlit local secrets — never commit
+.streamlit/secrets.toml

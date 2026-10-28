@@ -13,21 +13,21 @@ A complete record of one pipeline run, written so the output can be **audited ra
 | Stage | What happened | Tokens | Seconds |
 |---|---|---:|---:|
 | list_repos | 99 repositories found via the GitHub MCP server; 57 public. Private repositories are filtered out here, before anything is fetched. | — | 7.7 |
-| select_repos | Jev scored 47 repositories for $0.00161; kept 21. No Groq tokens spent. | — | 37.8 |
-| fetch_facts | Deterministic fetch for 21 repositories (19 with a README, 9 with tests). No model involved. | — | 25.3 |
+| select_repos | Jev scored 47 repositories for $0.00161; kept 21. No Groq tokens spent. | — | 50.6 |
+| fetch_facts | Deterministic fetch for 21 repositories (19 with a README, 9 with tests). No model involved. | — | 26.7 |
 | safety_scan | 1 finding(s) in the scanned repositories. | — | 0.0 |
 | summarize_repo | 21 repositories summarized, 111 raw claims proposed. | — | 0.0 |
 | verify_claims | 102/111 claims survived. Pure Python: no model, no tokens. | — | 0.0 |
-| build_resumes | 5 resumes written from verified claims only. | 9665 | 62.0 |
-| plan_improvements | 10 evidence-linked steps. | 3823 | 2390.0 |
+| build_resumes | 5 resumes written from verified claims only. | 9180 | 56.0 |
+| plan_improvements | 5 evidence-linked steps. | 2179 | 2637.9 |
 
 ## Headline numbers
 
 - **102/111 claims verified** (92%); 3 need measurement; 6 rejected outright.
 - **5 resumes** built from verified claims only.
-- **Groq:** 13,488 tokens across 3 node(s).
+- **Groq:** 11,359 tokens across 3 node(s).
 - **Cache hit rate:** 100% — an unchanged repo costs nothing on a re-run.
-- **Wall clock:** 2523s, most of it waiting on the 8,000 tokens/minute limit.
+- **Wall clock:** 2779s, most of it waiting on the 8,000 tokens/minute limit.
 
 ## Repository selection
 
@@ -35,27 +35,27 @@ Scored by Jev (a typed decision model), not by Groq — this costs fractions of 
 
 | Repo | Claimable | Tier | Language |
 |---|---:|---|---|
+| `AOA_Controller_ty` | 0.69 | mid | C |
 | `AiAgentDemo` | 0.69 | mid | Python |
-| `file-upload-server` | 0.67 | mid | HTML |
+| `file-upload-server` | 0.68 | mid | HTML |
 | `locallend` | 0.67 | mid | Java |
-| `AOA_Controller_ty` | 0.66 | mid | C |
-| `GithubRepoAnalyzer` | 0.65 | mid | JavaScript |
-| `next-express-ejs-crud` | 0.65 | mid | JavaScript |
+| `GithubRepoAnalyzer` | 0.64 | mid | JavaScript |
 | `spring-gemini-chat` | 0.64 | mid | HTML |
-| `nextjs-express-crud-hf` | 0.61 | mid | JavaScript |
+| `next-express-ejs-crud` | 0.63 | mid | JavaScript |
+| `nextjs-express-crud-hf` | 0.60 | mid | JavaScript |
 | `AOA_Controller_ty_1` | 0.59 | mid | C |
-| `chronosModelImprovement` | 0.58 | mid | Python |
-| `pehenava-backend` | 0.58 | mid | TypeScript |
+| `chronosModelImprovement` | 0.59 | mid | Python |
 | `websocket_mcqs1` | 0.58 | small | JavaScript |
+| `aniketqw.github.io` | 0.57 | mid | HTML |
+| `pehenava-backend` | 0.57 | mid | TypeScript |
 | `AiTerminal` | 0.56 | small | Go |
-| `tender_search_app` | 0.56 | small | Python |
-| `aniketqw.github.io` | 0.55 | mid | HTML |
-| `Rule-BasedCustomKafkaPartitioner` | 0.54 | small | Java |
-| `sandbox-agent` | 0.51 | mid | Python |
+| `tender_search_app` | 0.53 | small | Python |
+| `Rule-BasedCustomKafkaPartitioner` | 0.52 | small | Java |
 | `Booking-System` | 0.50 | mid | Python |
-| `TaskAssignWithDjango` | 0.49 | big | Python |
+| `sandbox-agent` | 0.50 | mid | Python |
+| `TaskAssignWithDjango` | 0.48 | big | Python |
 | `websocket_chatroom` | 0.48 | big | HTML |
-| `chat-starter-code` | 0.47 | small | HTML |
+| `chat-starter-code` | 0.46 | small | HTML |
 
 ## Claim verdicts
 
@@ -95,11 +95,11 @@ Deterministic 100-point ATS rubric, no model involved.
 
 | Role | Score | Keywords | Role fit | Numbers |
 |---|---:|---:|---:|---:|
-| balanced | **59.1** | 32.0 | 14.31 | 0.0 |
-| backend_platform_engineer | **43.02** | 19.4 | 10.97 | 0.0 |
-| ai_llm_agent_engineer | **35.75** | 13.25 | 9.8 | 0.0 |
-| data_scientist | **20.15** | 2.56 | 4.9 | 0.0 |
-| ml_engineer | **15.17** | 0.98 | 1.89 | 0.0 |
+| data_scientist | **52.67** | 27.12 | 14.37 | 0.0 |
+| balanced | **38.42** | 15.33 | 10.04 | 0.59 |
+| ai_llm_agent_engineer | **34.06** | 12.19 | 9.27 | 0.0 |
+| backend_platform_engineer | **32.25** | 10.88 | 9.0 | 0.0 |
+| ml_engineer | **25.88** | 6.36 | 7.08 | 0.0 |
 
 ### Bullets dropped during resume writing
 
@@ -107,20 +107,15 @@ None. Every generated bullet traced back to a verified claim.
 
 ## Improvement plan
 
-10 steps, ~67 hours, +34.5 ATS points. The gain figure comes from the same rubric that produced the score, not from the model.
+5 steps, ~40 hours, +16.9 ATS points. The gain figure comes from the same rubric that produced the score, not from the model.
 
 | Step | Repo | Hours | ATS gain |
 |---|---|---:|---:|
-| Add a PyTorch image classification model to AiAgentDemo | `AiAgentDemo` | 12 | +5.94 |
-| Document a computer‑vision pipeline in AiAgentDemo README | `AiAgentDemo` | 3 | +5.78 |
-| Add a Dockerfile and CI pipeline for reproducible ML builds | `AiAgentDemo` | 5 | +3.86 |
-| Create a benchmark suite for model evaluation in AiAgentDemo | `AiAgentDemo` | 6 | +3.86 |
-| Add CI/CD Automation for Tests and Docker Builds | `new work` | 10 | +3.53 |
-| Integrate TensorFlow inference endpoint into AiAgentDemo | `AiAgentDemo` | 8 | +3.05 |
-| Add System Architecture Diagram and Docs to AiAgentDemo | `AiAgentDemo` | 6 | +2.82 |
-| Document LLM Integration and Prompt Engineering | `AiAgentDemo` | 5 | +2.12 |
-| Implement Performance Benchmarks for Tool Calls | `AiAgentDemo` | 8 | +2.12 |
-| Introduce Git Contribution Guidelines and Changelog | `new work` | 4 | +1.41 |
+| Add Data Science Notebook to AiAgentDemo | `AiAgentDemo` | 12 | +7.23 |
+| Create R Analysis Demo Repository | `new work` | 10 | +3.95 |
+| Update AiAgentDemo README with Data Science Section | `AiAgentDemo` | 4 | +2.63 |
+| Add Model Metric Reporting Script | `AiAgentDemo` | 6 | +1.97 |
+| Implement Feature‑Engineering Module | `AiAgentDemo` | 8 | +1.1 |
 
 ## Security findings in the scanned repositories
 

@@ -4,63 +4,63 @@
     {
       "name": "list_repos",
       "detail": "99 repositories found via the GitHub MCP server; 57 public. Private repositories are filtered out here, before anything is fetched.",
-      "seconds": 7.7373740673065186,
+      "seconds": 7.716625928878784,
       "tokens": 0,
       "calls": 0
     },
     {
       "name": "select_repos",
       "detail": "Jev scored 47 repositories for $0.00161; kept 21. No Groq tokens spent.",
-      "seconds": 37.777507066726685,
+      "seconds": 50.55656814575195,
       "tokens": 0,
       "calls": 47
     },
     {
       "name": "fetch_facts",
       "detail": "Deterministic fetch for 21 repositories (19 with a README, 9 with tests). No model involved.",
-      "seconds": 25.343291759490967,
+      "seconds": 26.740355014801025,
       "tokens": 0,
       "calls": 0
     },
     {
       "name": "safety_scan",
       "detail": "1 finding(s) in the scanned repositories.",
-      "seconds": 0.030297279357910156,
+      "seconds": 0.014720916748046875,
       "tokens": 0,
       "calls": 0
     },
     {
       "name": "summarize_repo",
       "detail": "21 repositories summarized, 111 raw claims proposed.",
-      "seconds": 0.0280609130859375,
+      "seconds": 0.019538164138793945,
       "tokens": 0,
       "calls": 0
     },
     {
       "name": "verify_claims",
       "detail": "102/111 claims survived. Pure Python: no model, no tokens.",
-      "seconds": 0.019626855850219727,
+      "seconds": 0.016029834747314453,
       "tokens": 0,
       "calls": 0
     },
     {
       "name": "build_resumes",
       "detail": "5 resumes written from verified claims only.",
-      "seconds": 61.981977224349976,
-      "tokens": 9665,
+      "seconds": 56.00921082496643,
+      "tokens": 9180,
       "calls": 0
     },
     {
       "name": "plan_improvements",
-      "detail": "10 evidence-linked steps.",
-      "seconds": 2389.977992773056,
-      "tokens": 3823,
+      "detail": "5 evidence-linked steps.",
+      "seconds": 2637.9049043655396,
+      "tokens": 2179,
       "calls": 0
     }
   ],
   "usage": {
     "groq": {
-      "total": 13488,
+      "total": 11359,
       "calls": 3,
       "by_node": {
         "summarize_repo": {
@@ -71,20 +71,20 @@
         },
         "build_resumes": {
           "prompt": 6764,
-          "completion": 2901,
-          "total": 9665,
-          "reasoning": 488
+          "completion": 2416,
+          "total": 9180,
+          "reasoning": 305
         },
         "plan_improvements": {
-          "prompt": 2159,
-          "completion": 1664,
-          "total": 3823,
-          "reasoning": 138
+          "prompt": 1088,
+          "completion": 1091,
+          "total": 2179,
+          "reasoning": 338
         }
       }
     },
     "cache_hit_rate": 1.0,
-    "elapsed_s": 2522.8968229293823
+    "elapsed_s": 2778.978061914444
   },
   "claims": {
     "verified": 102,
@@ -92,10 +92,10 @@
     "rejected": 6
   },
   "scores": {
-    "ai_llm_agent_engineer": 35.75,
-    "ml_engineer": 15.17,
-    "backend_platform_engineer": 43.02,
-    "data_scientist": 20.15,
-    "balanced": 59.1
+    "ai_llm_agent_engineer": 34.06,
+    "ml_engineer": 25.88,
+    "backend_platform_engineer": 32.25,
+    "data_scientist": 52.67,
+    "balanced": 38.42
   }
 }
