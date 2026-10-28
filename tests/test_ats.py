@@ -175,3 +175,36 @@ def test_a_strong_resume_outscores_an_irrelevant_one_overall():
             dense=None, lexical=bm25_similarity(text, JD), skills=match.score)).raw
 
     assert score(STRONG, {"python", "docker"}) > score(IRRELEVANT, {"teaching"})
+
+
+# -- skill normalisation --------------------------------------------------
+@pytest.mark.parametrize("surface,expected", [
+    ("JS", "javascript"), ("ECMAScript", "javascript"),
+    ("k8s", "kubernetes"), ("K8S", "kubernetes"),
+    ("Postgres", "postgresql"), ("sklearn", "scikit-learn"),
+    ("CI/CD", "continuous integration"), ("golang", "go"),
+    ("experience with Kubernetes", "kubernetes"),
+])
+def test_aliases_collapse_to_one_canonical_name(surface, expected):
+    from rba.ats.normalise import canonical
+    assert canonical(surface) == expected
+
+
+def test_unknown_skills_pass_through_rather_than_being_forced():
+    """ESCO's API answers 'react' with 'react to emergency situations in a
+    live performance environment'. A confident wrong answer is worse than no
+    answer, so unknown skills stay as themselves."""
+    from rba.ats.normalise import canonical
+    assert canonical("quantum basket weaving") == "quantum basket weaving"
+
+
+def test_normalisation_makes_aliases_score_as_one_skill():
+    assert weighted_jaccard({"JS"}, required={"ECMAScript"}).score == pytest.approx(1.0)
+    assert weighted_jaccard({"k8s"}, required={"Kubernetes"}).score == pytest.approx(1.0)
+
+
+def test_coverage_reports_what_we_recognised():
+    from rba.ats.normalise import coverage
+    known, unknown = coverage(["JS", "k8s", "quantum basket weaving"])
+    assert known == ["javascript", "kubernetes"]
+    assert unknown == ["quantum basket weaving"]

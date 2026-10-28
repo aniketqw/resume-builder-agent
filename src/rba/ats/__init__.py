@@ -12,7 +12,8 @@ Three independent channels, fused:
 * **dense**   semantic similarity from a sentence embedding model
 * **lexical** BM25, which keeps exact tokens like "AWS", "CPA", "Kubernetes"
               and version strings that a 384-dimension embedding blurs away
-* **skills**  weighted Jaccard over ESCO skill ids — no model, fully auditable
+* **skills**  weighted Jaccard over canonicalised skill names — no model,
+              fully auditable
 
 What this package deliberately does *not* do:
 
@@ -36,6 +37,7 @@ from .fusion import (
     theoretical_min_max,
 )
 from .lexical import bm25_similarity, tokenize
+from .normalise import canonical, normalise_all
 from .skills import weighted_jaccard
 
 __all__ = [
@@ -43,7 +45,9 @@ __all__ = [
     "ChannelScores",
     "FusedScore",
     "bm25_similarity",
+    "canonical",
     "convex_fuse",
+    "normalise_all",
     "ordinal_band",
     "theoretical_min_max",
     "tokenize",

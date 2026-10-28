@@ -8,14 +8,15 @@ Required skills weigh more than preferred ones, mirroring how real systems
 separate the two: Greenhouse Talent Filtering has Required (AND) and Preferred
 (OR) terms, and Workday grades on "basic" versus "preferred" qualifications.
 
-Skills arrive here already normalised to ESCO ids where possible (see
-:mod:`rba.ats.esco`). ESCO has ~13,900 skills against O*NET's 177 skill
-elements, and O*NET's are abilities — "Active Listening", "Critical Thinking" —
-rather than the hard skills a resume scorer needs.
+Surface forms are canonicalised first via :mod:`rba.ats.normalise`, so "JS",
+"JavaScript" and "ECMAScript" count once. That module explains why a curated
+alias table beat the ESCO taxonomy here.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+
+from .normalise import canonical
 
 REQUIRED_WEIGHT = 1.0
 PREFERRED_WEIGHT = 0.5
@@ -42,7 +43,7 @@ class SkillMatch:
 
 
 def _norm(skill: str) -> str:
-    return " ".join((skill or "").lower().split())
+    return canonical(skill)
 
 
 def weighted_jaccard(resume_skills: set[str] | list[str],
