@@ -73,27 +73,64 @@ def load(local_only: bool = False):
         return None
 
 
-def embed(texts: list[str], local_only: bool = False) -> np.ndarray | None:
-    """CLS embeddings, L2-normalised. None if the model is unavailable."""
+# How many texts go through the transformer at once.
+#
+# This is a memory limit, not a speed knob. The attribution engine asks for one
+# variant per bullet, so a 150-bullet resume becomes a 152-text call, and the
+# model holds a [batch, seq_len, hidden] activation for every layer at once.
+# Measured peak RSS embedding full-page resume texts in ONE call:
+#
+#     152 texts, unchunked -> 4,133 MB      80 -> 2,034 MB
+#      40 texts, unchunked -> 1,368 MB      16 ->   574 MB
+#
+# Streamlit Community Cloud gives about 1 GB, so an unchunked call was killed
+# by the OOM reaper -- which surfaces as a blank "Error running app" page with
+# no traceback, because the process never gets to raise.
+#
+# Chunked, peak memory is flat in the number of texts and the chunk size buys
+# headroom for free -- 152 texts cost the same time either way:
+#
+#     BATCH  2 -> 335 MB, 35.0 s        BATCH  8 -> 598 MB, 36.6 s
+#     BATCH  4 -> 446 MB, 35.7 s        BATCH 12 -> 744 MB, 36.8 s
+#
+# 4 leaves room for Streamlit's own footprint on a 1 GB container.
+BATCH = 4
+
+
+def embed(texts: list[str], local_only: bool = False,
+          batch: int = BATCH) -> np.ndarray | None:
+    """CLS embeddings, L2-normalised. None if the model is unavailable.
+
+    Chunked: the result is identical to a single large call, but peak memory
+    stays flat in the number of texts instead of growing with it.
+    """
     if not texts:
         return None
     loaded = load(local_only=local_only)
     if loaded is None:
         return None
     session, tokenizer = loaded
-
-    encodings = tokenizer.encode_batch([t or "" for t in texts])
-    input_ids = np.array([e.ids for e in encodings], dtype=np.int64)
-    attention = np.array([e.attention_mask for e in encodings], dtype=np.int64)
-    feed = {"input_ids": input_ids, "attention_mask": attention}
     expected = {i.name for i in session.get_inputs()}
-    if "token_type_ids" in expected:
-        feed["token_type_ids"] = np.zeros_like(input_ids)
 
-    hidden = session.run(None, {k: v for k, v in feed.items() if k in expected})[0]
-    # BGE uses the CLS token, not mean pooling. Mean pooling here measurably
-    # degrades retrieval quality for this model family.
-    cls = hidden[:, 0, :]
+    out: list[np.ndarray] = []
+    size = max(1, batch)
+    for start in range(0, len(texts), size):
+        chunk = [t or "" for t in texts[start:start + size]]
+        encodings = tokenizer.encode_batch(chunk)
+        input_ids = np.array([e.ids for e in encodings], dtype=np.int64)
+        attention = np.array([e.attention_mask for e in encodings], dtype=np.int64)
+        feed = {"input_ids": input_ids, "attention_mask": attention}
+        if "token_type_ids" in expected:
+            feed["token_type_ids"] = np.zeros_like(input_ids)
+
+        hidden = session.run(None,
+                             {k: v for k, v in feed.items() if k in expected})[0]
+        # BGE uses the CLS token, not mean pooling. Mean pooling here measurably
+        # degrades retrieval quality for this model family.
+        out.append(np.array(hidden[:, 0, :], dtype=np.float32))
+        del hidden
+
+    cls = np.concatenate(out, axis=0) if len(out) > 1 else out[0]
     norms = np.linalg.norm(cls, axis=1, keepdims=True)
     return cls / np.clip(norms, 1e-9, None)
 

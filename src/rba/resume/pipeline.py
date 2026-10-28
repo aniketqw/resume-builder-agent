@@ -84,6 +84,13 @@ async def build_from_github(username: str, *, github_token: str = "",
     stats["claims_rejected"] = sum(
         1 for c in claims if getattr(c.status, "value", "") == "rejected")
 
+    # Per-repo failures are collected rather than raised, so one dead
+    # repository cannot lose the whole run. They still have to reach the
+    # caller: an invalid Groq key fails every summary, and without this the
+    # user gets an empty resume and no reason for it.
+    stats["errors"] = list(state.get("errors") or [])
+    stats["summarised"] = len(state.get("summaries") or {})
+
     doc = from_summaries(state.get("summaries") or {}, name=username,
                          headline="", contact=f"github.com/{username}")
     report("Done", 1.0)

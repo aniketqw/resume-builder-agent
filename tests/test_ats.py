@@ -355,3 +355,51 @@ def test_calibration_can_be_turned_off():
         required_skills=REQUIRED, use_dense=False, calibrate=False)
     assert not report.is_calibrated
     assert "uncalibrated" in report.scale_note.lower()
+
+
+# -- batching -------------------------------------------------------------
+# A 152-text call (one variant per bullet, which is what attribution asks for)
+# peaked at 4,133 MB unchunked and was OOM-killed on Streamlit's ~1 GB
+# container. The kill produced a blank "Error running app" page with no
+# traceback, because the process never got far enough to raise one.
+def test_embedding_is_chunked_so_memory_does_not_grow_with_input():
+    from rba.ats.dense import BATCH, embed
+
+    assert BATCH <= 8, "a large batch is what caused the out-of-memory kill"
+    vectors = embed(["Python and Docker at scale."] * (BATCH * 3 + 1))
+    if vectors is None:
+        pytest.skip("dense channel unavailable")
+    assert vectors.shape == (BATCH * 3 + 1, vectors.shape[1])
+
+
+def test_chunking_does_not_change_the_embeddings():
+    """Chunk boundaries must not move a score. Padding differs per chunk, so
+    this is equal to float32 tolerance rather than bit-identical."""
+    import numpy as np
+
+    from rba.ats.dense import embed
+
+    texts = [f"Built service {i} with Python and Kubernetes." for i in range(11)]
+    texts += ["", "A much longer line. " * 120]
+    single = embed(texts, batch=10_000)
+    if single is None:
+        pytest.skip("dense channel unavailable")
+    for size in (1, 3, 8):
+        assert np.allclose(single, embed(texts, batch=size), atol=1e-6)
+
+
+def test_every_text_keeps_its_position_across_chunks():
+    """An off-by-one in chunking would silently score the wrong bullet."""
+    import numpy as np
+
+    from rba.ats.dense import embed
+
+    texts = ["kubernetes docker", "mongodb redis", "pytorch tensorflow",
+             "react typescript", "kafka spark", "terraform ansible", "rust go"]
+    reference = embed(texts, batch=10_000)
+    if reference is None:
+        pytest.skip("dense channel unavailable")
+    chunked = embed(texts, batch=2)
+    for index in range(len(texts)):
+        best = int(np.argmax(chunked @ reference.T, axis=1)[index])
+        assert best == index, f"text {index} moved to position {best}"
