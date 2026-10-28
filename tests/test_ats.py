@@ -208,3 +208,82 @@ def test_coverage_reports_what_we_recognised():
     known, unknown = coverage(["JS", "k8s", "quantum basket weaving"])
     assert known == ["javascript", "kubernetes"]
     assert unknown == ["quantum basket weaving"]
+
+
+# -- background corpus ----------------------------------------------------
+def test_background_corpus_is_bundled_and_diverse():
+    """BM25's IDF is meaningless without one: the same resume scored 0.180
+    with no corpus and 0.476 against a background."""
+    from rba.ats.corpus import background_corpus, families
+    corpus = background_corpus()
+    assert len(corpus) >= 15
+    # Non-software roles matter: they keep "Python" rare, as it is in the
+    # world, rather than universal as it would be in an all-engineering sample.
+    assert {"teacher", "nurse", "accountant", "marketing"} <= set(families())
+
+
+def test_corpus_raises_bm25_for_a_relevant_resume():
+    from rba.ats.corpus import background_corpus
+    jd = "Backend Engineer. Required: Python, Docker, Kubernetes, REST APIs."
+    resume = "Built Python services with Docker and Kubernetes, exposing REST APIs."
+    bare = bm25_similarity(resume, jd)
+    backed = bm25_similarity(resume, jd,
+                             corpus=list(background_corpus()) + [jd, resume])
+    assert backed > bare
+
+
+# -- end-to-end scoring ---------------------------------------------------
+JD_BACKEND = ("Backend Engineer. Required: Python, Docker, Kubernetes, "
+              "REST APIs. Preferred: AWS, Kafka.")
+REQUIRED = ["Python", "Docker", "Kubernetes", "REST API"]
+
+
+def _score(text, skills, **kw):
+    from rba.ats import score_resume_against_jd
+    return score_resume_against_jd(text, JD_BACKEND, resume_skills=skills,
+                                   required_skills=REQUIRED,
+                                   preferred_skills=["AWS", "Kafka"],
+                                   use_dense=False, **kw)
+
+
+def test_relevance_ordering_end_to_end():
+    strong = _score("Built Python FastAPI services with Docker on Kubernetes, "
+                    "designing REST APIs.", ["Python", "Docker", "k8s", "REST"])
+    partial = _score("Wrote Python scripts and some Docker files.",
+                     ["Python", "Docker"])
+    wrong = _score("Taught history and organised community events.",
+                   ["lesson planning"])
+    assert strong.score_100 > partial.score_100 > wrong.score_100
+
+
+def test_report_names_the_missing_required_skills():
+    report = _score("Wrote Python scripts.", ["Python"])
+    assert "kubernetes" in report.skills.missing_required
+    assert any("Required skills not evidenced" in line
+               for line in report.explain())
+
+
+def test_disabling_dense_is_recorded_not_silent():
+    report = _score("Python and Docker work.", ["Python", "Docker"])
+    assert "dense" not in report.fused.channels
+    assert any("Semantic channel disabled" in note for note in report.notes)
+
+
+def test_missing_structured_skills_skips_the_channel():
+    from rba.ats import score_resume_against_jd
+    report = score_resume_against_jd("Python and Docker work.", JD_BACKEND,
+                                     use_dense=False)
+    assert "skills" not in report.fused.channels
+    assert any("skipped rather than scored zero" in n for n in report.notes)
+
+
+def test_explain_is_human_readable_and_weighted():
+    report = _score("Python Docker Kubernetes REST APIs.",
+                    ["Python", "Docker", "Kubernetes", "REST API"])
+    text = " ".join(report.explain())
+    assert "Keyword/BM25 match" in text and "weight" in text
+
+
+def test_score_stays_within_bounds():
+    for text, skills in (("", []), (JD_BACKEND, REQUIRED), ("x" * 5000, [])):
+        assert 0.0 <= _score(text, skills).score_100 <= 100.0

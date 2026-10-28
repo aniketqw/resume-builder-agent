@@ -38,17 +38,20 @@ from .fusion import (
 )
 from .lexical import bm25_similarity, tokenize
 from .normalise import canonical, normalise_all
+from .score import ScoreReport, score_resume_against_jd
 from .skills import weighted_jaccard
 
 __all__ = [
     "CHANNEL_WEIGHTS",
     "ChannelScores",
+    "ScoreReport",
     "FusedScore",
     "bm25_similarity",
     "canonical",
     "convex_fuse",
     "normalise_all",
     "ordinal_band",
+    "score_resume_against_jd",
     "theoretical_min_max",
     "tokenize",
     "weighted_jaccard",
