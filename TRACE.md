@@ -2316,6 +2316,225 @@ during the cold run."*
 
 ---
 
+# Session 2 — live point scoring
+
+Six commits, written as the work happened rather than reconstructed afterwards.
+Every number below was measured in this session; the command that produced it is
+named.
+
+---
+
+## ac2197a — perf: halve a re-score, and stop the baseline moving with the user   2026-10-29
+
+**Problem** Two separate faults blocking live editing. A re-score cost 590 ms,
+which is a wait rather than a response. And `baseline()` carried the user's
+current toggles, so switching off one of their own lines switched it off in the
+baseline too — "+N vs your uploaded resume" reported *no change* on a document
+that had plainly changed.
+
+**Investigation** Timing the embedding call by part was what exposed the first:
+
+| call | cost |
+|---|---|
+| `embed([doc, jd])` | 590 ms |
+| `embed([doc])` | 291 ms |
+| `embed([jd])` | 10 ms |
+
+The parts cost half what the whole does, which is only possible if batching is
+doing extra work. It is: `tokenizer.encode_batch` pads every text in a chunk to
+the longest member, so a ten-word job description sent alongside a 662-word
+resume is padded out to the resume's length. The same arithmetic explains the
+full attribution exactly — 15 variants measured 4,659 ms against 15 x 291 ms.
+
+**Decision** Cache the job description's vector (`_jd_vector`, an `lru_cache`)
+and keep it out of every batch. It does not change while the user edits, so
+re-embedding it was waste on top of waste.
+
+**The check that made it safe** An optimisation that silently changed scores
+would be worse than the cost it saved. Batched and split embeddings agree to
+**6.7e-08** and the resulting cosine to six decimal places — attention masking
+makes padding irrelevant, as it should. Asserted in
+`test_splitting_the_jd_out_of_the_batch_does_not_change_the_vectors`.
+
+**Measured** 590 ms -> **291 ms**, median of five consecutive toggles.
+
+**Files** `src/rba/resume/attribution.py`, `src/rba/resume/merge.py`,
+`tests/test_live.py`, `tests/test_merge.py`
+
+---
+
+## c30e9c8 — fix: check every credential before a run spends anything   2026-10-29
+
+**Problem** A real run produced this, and nothing more useful:
+
+```
+Jev unavailable; using the heuristic fallback.
+summarize failed for vd_p2: 401: Invalid API Key
+```
+
+One repository named, partway through, after minutes of work.
+
+**Investigation** The key in `.env` answered `HTTP 200` when tested directly, so
+it was not the key that failed. Reading the plumbing: `pipeline.py` passes
+`api_key=groq_key or None`, so a *blank* box correctly falls back to `.env` —
+but a **non-empty wrong key silently overrides a working one**. The other
+repositories had not succeeded; they came from the SQLite response cache and
+never touched the network, which is what disguised a total failure as a
+per-repository one.
+
+**Decision** One free metadata call per service before anything else, reporting
+the service, the verdict, **and which source the key came from**. The last part
+is the actual fix — the failure was never "a key was wrong", it was "nobody said
+which key was being used".
+
+**Measured** Against a deliberately invalid key:
+`Groq: failed (from argument) — the key was rejected (401). This key overrides
+any other source, so a stale value here will mask a working one.`
+
+**Honest gap** The `Jev unavailable` line could not be reproduced locally;
+`available` is `True` here with a 107-character key and TypeSafe answers 200.
+Preflight will name the real cause on the next run rather than this document
+guessing at it now.
+
+**Files** `src/rba/preflight.py`, `src/rba/resume/pipeline.py`
+
+---
+
+## 3238c90 — feat: rephrase every point, then measure whether it actually helps   2026-10-29
+
+**Problem** The artifact this project is measured against offers "best present
+work" — rewriting a line so it scores better. Doing that naively means asking a
+model to both rewrite *and* estimate the benefit, which reintroduces exactly the
+invention the project exists to prevent.
+
+**Options** (a) one call per bullet — simplest, but multiplies requests by the
+number of lines; (b) one call per project returning K rewrites for each of its
+bullets; (c) one call for the whole document — cheapest, but stacking degrades
+past roughly eight outputs.
+
+**Decision** (b). An orchestrator fans out one structured call per project; each
+worker returns K=3 rewrites for every point it owns.
+
+**The part that matters** The model never scores anything. Every rewrite is
+substituted into the document and re-scored with `rescore()`, so the number
+beside a suggestion is a measurement. And the rephrase-only rule is enforced in
+code — `reject_reason()` — not requested in the prompt, because a prompt is a
+request and a check is a guarantee.
+
+**Measured** 4 projects, **6 requests, 7,018 tokens, 79 s**. 45 rewrites kept,
+0 rejected.
+
+Zero rejections is the right outcome only if the guard actually fires, so it was
+poisoned along every route against a real bullet:
+
+| poison | verdict |
+|---|---|
+| "cut review time by 40%" | rejected — number absent from evidence |
+| "serving 2 million requests per day" | rejected — number absent from evidence |
+| "on Kubernetes with Terraform and Kafka" | rejected — technology absent from evidence |
+| "doubled throughput versus the baseline" | rejected — outcome not in evidence |
+| "Led a team of fifteen engineers" | rejected — does not restate the original |
+| an honest rephrase | **kept** |
+
+**Reported honestly** Gains are small: **+0.44 at best**. Rephrasing one line of
+forty barely moves a fused score, and saying otherwise would be the same
+overclaim the rest of the project refuses.
+
+**What did not work first** Three rejections of legitimate rewrites, all fixed:
+the technology check compared canonicalised names against surface strings, so an
+honest rewrite using the evidence's own word was rejected; its word-boundary
+rule let `Redis-cached` through while mishandling `Postgres.`; and comparing
+impact language term-by-term rejected "reduced" -> "accelerated".
+
+**Files** `src/rba/nodes/variants.py`, `src/rba/prompts/variant.v1.md`,
+`tests/test_variants.py`
+
+---
+
+## cec4763 — fix: the LaTeX export had never once been compiled   2026-10-29
+
+**Problem** The `.tex` export was shipped on the assumption that generating
+plausible LaTeX is the same as producing a working document. There was no
+`pdflatex`, `xelatex`, `tectonic` or `latexmk` on the machine, so nothing had
+ever proved it built. This is the project's own rule broken by its author: a
+claim asserted without the evidence that would support it.
+
+**Decision** Install tectonic — one self-contained binary rather than a 4 GB TeX
+Live — and make a test compile the file and assert a PDF comes out.
+
+**What compiling found** Ten defects. Four were visible by reading: a raw `|` in
+a tabularx cell, URLs unlinked while `hyperref` was loaded, inconsistent heading
+case, `X` columns not ragged-right. **Six were invisible without an engine:**
+
+- `\bfseries\scshape` was silently substituted — `T1/lmr/bx/sc` does not exist
+- `show_numbers=False` emitted em dashes with no slot in T1, so eighteen
+  characters vanished from the page with no error
+- `\parindent` pushed full-width tables past the margin (3 overfull boxes)
+- the six-column table squeezed its only flexible column below its own header
+- `INSTITUTE/COLLEGE` is one unbreakable token — TeX will not hyphenate at `/`
+- an empty document produced **no PDF at all**
+
+That ratio is the lesson: two thirds of the defects were undetectable by the
+method previously used to call the feature done.
+
+**A second inconsistency** At 10pt this ran to two pages while fpdf2 fitted one
+— the same document, two different lengths. fpdf2 gets there by compiling and
+shrinking until it fits, which is impossible in LaTeX here because Streamlit
+Community Cloud has no TeX engine. So the density is *chosen* rather than
+discovered: `extarticle` at 8pt, against fpdf2's measured 8.55pt effective size.
+
+**Measured** Both styles compile to **1 page, 0 warnings** — no overfull or
+underfull boxes, no font substitutions, no missing characters. Text extracted
+back out of the compiled PDF confirms the content survived.
+
+**Files** `src/rba/resume/render/latex.py`, `tests/test_latex.py`
+
+---
+
+## 5ca8ad0 — feat: a point is now a control, not a form field   2026-10-29
+
+**Problem** The per-point deltas were exact and had been treated as finished on
+that basis. But they sat behind a *Rescore* button: clicking a line did nothing
+until you pressed it. Exact and useful are different things, and a measurement
+you wait for is a report, not a control.
+
+**Decision** Put everything that reacts to a click — score, diagnostics,
+preview, checkboxes — inside one `st.fragment`. Streamlit reruns the whole
+script on any widget change, so a toggle was redrawing the sidebar, the uploader
+and the download buttons before the number moved. A fragment scopes that rerun.
+
+**Caught while testing** The first version was wrong in a way that looks right:
+the score lagged exactly one click behind. Streamlit keeps widget values in
+`session_state`, and `editor()` only copied them onto the bullets when it ran —
+*after* the score had been computed from the stale document. `sync_from_widgets()`
+now applies widget state first.
+
+The test asserts the behaviour rather than the plumbing: untick a line, and the
+score must differ, with no Rescore press in between. That is what caught it.
+
+**The honest compromise** A full delta refresh costs 4.8 s for fifteen lines, so
+it cannot run on every click. The figures keep their last exact values, are
+marked `~` once the document has moved away from what they measured, and refresh
+on request. Nothing shown is ever an approximation — the mean-pool shortcut
+remains rejected for getting the *sign* wrong on 6 of 20 bullets.
+
+**Measured** **291 ms** median over five consecutive toggles, against 590 ms
+behind a button.
+
+**Files** `app.py`, `tests/test_app.py`
+
+---
+
+## 7d085fd — docs: TRACE.md   2026-10-29
+
+Everything above this section, reconstructed; everything in Session 2, recorded
+as it happened. The distinction is marked because a trace that invents its own
+history fails the same rule as a resume that invents an achievement.
+
+---
+
+---
+
 # Cross-cutting lessons
 
 Each of these is asserted only where the history supports it, with the commits
@@ -2526,12 +2745,15 @@ In the interest of the rule this project runs on, the gaps:
   set** are both described as small and synthetic by their own modules. Their
   construction is documented; their adequacy is not measured against anything
   external, and `build_calibration.py` says as much.
-- The README states **185 tests**; this document did not run the suite to
-  confirm that figure, per the read-only constraint under which it was written.
+- The README stated **185 tests** when this was written; the suite now reports
+  **439 passing**, confirmed by `pytest -p no:warnings` at the close of
+  session 2.
 
 ---
 
-*Compiled from 38 commits, their diffs, and the module docstrings, `README.md`,
+*Compiled from 44 commits — the first 38 reconstructed from their diffs and
+the module docstrings, the last six recorded as the work happened — together
+with `README.md`,
 `run.md`, `evals/budget.md` and `evals/budget.json` in this repository. Every
 number above is quoted from one of those sources. Where no source recorded a
 number, this document says so.*
