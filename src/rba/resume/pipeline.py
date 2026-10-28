@@ -19,6 +19,7 @@ from ..nodes.fetch import fetch_facts
 from ..nodes.select import select_repos
 from ..nodes.summarize import summarize_repos
 from ..nodes.verify import verify_claims
+from ..preflight import blocking_failures, check_credentials
 from .document import ResumeDoc, from_summaries
 
 log = logging.getLogger(__name__)
@@ -40,9 +41,22 @@ async def build_from_github(username: str, *, github_token: str = "",
     cfg = config or Config.load()
     cfg.raw["selection"]["max_repos"] = max_repos
 
+    # Check credentials before spending anything. Discovering a bad key after
+    # ten repositories have been fetched -- with cached ones masking it -- is
+    # how a stale key in the UI once looked like a per-repository failure.
+    report("Checking credentials…", 0.02)
+    checks = await check_credentials(groq_key=groq_key or None,
+                                     typesafe_key=jev_key or None,
+                                     github_token=github_token or None,
+                                     config=cfg)
+    stats_checks = [c.line() for c in checks]
+    failed = blocking_failures(checks)
+    if failed:
+        raise RuntimeError("; ".join(c.line() for c in failed))
+
     report("Connecting to GitHub…", 0.05)
     backend = await make_backend(cfg, token=github_token or None)
-    stats: dict = {}
+    stats: dict = {"credentials": stats_checks}
     try:
         repos = await backend.list_repos(username)
         public = [r for r in repos if not r.is_private]
