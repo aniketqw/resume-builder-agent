@@ -1,4 +1,11 @@
-from rba.nodes.build import comparison_table, enforce_provenance, usable_claims
+import pytest
+
+from rba.nodes.build import (
+    comparison_table,
+    enforce_provenance,
+    strip_citations,
+    usable_claims,
+)
 from rba.scoring import load_roles
 from rba.state import Claim, ClaimStatus, Resume, RoleScore
 
@@ -50,6 +57,44 @@ def test_versions_in_bullets_are_not_flagged():
         "projects": ["Built a service with Python 3.11"]})
     _out, dropped = enforce_provenance(resume, claims)
     assert dropped == []
+
+
+# -- claim-id citations ---------------------------------------------------
+@pytest.mark.parametrize("text,expected", [
+    ("Built X for agents. (AiAgentDemo#0)", "Built X for agents."),
+    ("Did Y (AiAgnoSample#0, AiAgnoSample#1)", "Did Y"),
+    ("Did Z (AOA_Controller_ty#3, #4, #5).", "Did Z."),
+    ("Agentic retrieval. (used_claim_ids: AiAgentDemo#0)", "Agentic retrieval."),
+    ("Shipped 34 tests covering the API", "Shipped 34 tests covering the API"),
+    # gpt-oss reaches for full-width brackets unprompted; a second live run
+    # lost 8 bullets to this variant after the parenthesis form was fixed.
+    ("Did X\u3010AiAgnoSample#0\u3011", "Did X"),
+    ("Multi-threaded C\u3010AOA#0\u3011\u3010AOA#1\u3011", "Multi-threaded C"),
+    ("Did Y [lecturelens#3]", "Did Y"),
+])
+def test_claim_id_citations_are_stripped(text, expected):
+    assert strip_citations(text) == expected
+
+
+def test_citation_digits_are_not_read_as_invented_numbers():
+    """Regression: '(AiAgnoSample#0, #4, #5)' was parsed as the numbers 0, 4, 5
+    and silently destroyed 19 legitimate bullets in a live run."""
+    claims = [c("AiAgnoSample#4", "Validates each extracted fact against its chunk")]
+    resume = Resume(role="balanced", used_claim_ids=["AiAgnoSample#4"], sections={
+        "projects": ["Built validation scripts for each pipeline stage "
+                     "(AiAgnoSample#4, #5)"]})
+    out, dropped = enforce_provenance(resume, claims)
+    assert dropped == [], "a claim id is not a claim about the world"
+    assert out.sections["projects"] == [
+        "Built validation scripts for each pipeline stage"]
+
+
+def test_a_real_invented_number_still_dies_alongside_a_citation():
+    claims = [c("demo#0", "Ships tests")]
+    resume = Resume(role="balanced", used_claim_ids=["demo#0"], sections={
+        "projects": ["Served 9,999 requests per second (demo#0)"]})
+    _out, dropped = enforce_provenance(resume, claims)
+    assert len(dropped) == 1 and "9,999" in dropped[0]
 
 
 # -- comparison -----------------------------------------------------------

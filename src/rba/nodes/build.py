@@ -21,9 +21,34 @@ from .verify import numbers_in
 
 log = logging.getLogger(__name__)
 
-PROMPT = "resume.v1"
+PROMPT = "resume.v2"
 SECTIONS = ["summary", "experience", "projects", "skills", "education"]
 MEASURE_TAG = re.compile(r"\[MEASURE:[^\]]*\]")
+
+# Claim-id citations the generator appends to bullets, e.g.
+# "(AiAgnoSample#0, #1, #2)" or "(used_claim_ids: AiAgentDemo#0)".
+# These have to be stripped before the number check: the digits in an id are
+# not claims about the world, and reading them as such silently destroyed 19
+# legitimate bullets in a live run. They are also removed from the output,
+# since an internal id has no business being on a resume.
+# Claim-id citations the generator appends to bullets, e.g.
+# "(AiAgnoSample#0, #1, #2)", "[lecturelens#3]" or the full-width
+# "【AOA_Controller_ty#0】" that gpt-oss reaches for unprompted.
+# These must be stripped before the number check: the digits in an id are not
+# claims about the world, and reading them as such silently destroyed 19
+# legitimate bullets in one live run and 8 more in the next, once with each
+# bracket style. They are also removed from the output, since an internal id
+# has no business being on a resume.
+_ID_LIST = (r"(?:used_claim_ids:\s*)?"
+            r"[A-Za-z0-9_.\-]*#\d+"
+            r"(?:\s*,\s*(?:[A-Za-z0-9_.\-]*)?#\d+)*")
+CITATION = re.compile(
+    rf"\s*(?:\({_ID_LIST}\)|\[{_ID_LIST}\]|【{_ID_LIST}】)")
+
+
+def strip_citations(text: str) -> str:
+    """Remove trailing claim-id references from a bullet."""
+    return CITATION.sub("", text).strip()
 
 
 class _Resume(BaseModel):
@@ -34,7 +59,7 @@ class _Resume(BaseModel):
     used_claim_ids: list[str] = Field(description="Ids of every claim used")
 
 
-def claims_block(claims: list[Claim], limit: int = 40) -> str:
+def claims_block(claims: list[Claim], limit: int = 24) -> str:
     """Render claims for the prompt, flagging the ones that lack a measurement."""
     lines = []
     for c in claims[:limit]:
@@ -68,14 +93,16 @@ def enforce_provenance(resume: Resume, claims: list[Claim]) -> tuple[Resume, lis
     dropped: list[str] = []
     for section, bullets in list(resume.sections.items()):
         kept = []
-        for b in bullets:
-            stripped = MEASURE_TAG.sub(" ", b)
-            invented = [n for n in numbers_in(stripped) if n not in allowed_numbers]
+        for raw in bullets:
+            bullet = strip_citations(raw)
+            checkable = MEASURE_TAG.sub(" ", bullet)
+            invented = [n for n in numbers_in(checkable) if n not in allowed_numbers]
             if invented:
-                dropped.append(f"{b}  (invented: {', '.join(invented)})")
+                dropped.append(f"{bullet}  (invented: {', '.join(invented)})")
                 continue
-            kept.append(b)
+            kept.append(bullet)
         resume.sections[section] = kept
+    resume.summary = strip_citations(resume.summary)
     return resume, dropped
 
 
@@ -92,7 +119,12 @@ async def build_one(client: GroqClient, role_key: str, claims: list[Claim],
         claims=claims_block(usable),
         sections=", ".join(SECTIONS),
     )
-    obj, _usage = await client.structured(messages, _Resume, node="build_resumes")
+    # A resume payload is small; the generous global max_tokens is sized for
+    # summarization. Keeping this tight matters because each reserved token
+    # comes out of the same 8,000-per-minute budget, and an oversized reserve
+    # throttles the whole stage.
+    obj, _usage = await client.structured(messages, _Resume, node="build_resumes",
+                                          max_tokens=1500)
 
     resume = Resume(
         role=role_key,

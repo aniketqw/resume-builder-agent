@@ -1,6 +1,6 @@
 """Groq strict mode fails the request unless every object is fully specified."""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from rba.schema import lint_strict_schema, response_format, to_strict_schema
 
@@ -51,6 +51,31 @@ def test_response_format_shape_matches_groq_api():
     assert rf["type"] == "json_schema"
     assert rf["json_schema"]["name"] == "repo_summary"
     assert rf["json_schema"]["strict"] is True
+
+
+class StepLike(BaseModel):
+    """Fields deliberately named after JSON-Schema annotations."""
+    title: str
+    default: str = "x"
+    examples: list[str] = Field(default_factory=list)
+    hours: float = 0.0
+
+
+def test_fields_named_after_schema_annotations_survive():
+    """Regression: `title`, `default` and `examples` were stripped as noisy
+    annotations even when they were the model's own fields. The plan schema
+    lost its `title` field, and every generated step then failed validation."""
+    schema = to_strict_schema(StepLike)
+    assert set(schema["properties"]) == {"title", "default", "examples", "hours"}
+    assert set(schema["required"]) == {"title", "default", "examples", "hours"}
+    assert lint_strict_schema(schema) == []
+
+
+def test_annotations_are_still_stripped_from_schema_nodes():
+    schema = to_strict_schema(StepLike)
+    # The *annotation* on the whole object is gone, the *field* is not.
+    assert "title" in schema["properties"]
+    assert schema["properties"]["hours"].get("title") is None
 
 
 def test_linter_catches_a_bad_schema():

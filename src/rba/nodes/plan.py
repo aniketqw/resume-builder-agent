@@ -39,7 +39,7 @@ class _Plan(BaseModel):
     steps: list[_Step] = Field(description="Improvement steps, highest impact first")
 
 
-def _claims_digest(claims: list[Claim], limit: int = 25) -> str:
+def _claims_digest(claims: list[Claim], limit: int = 18) -> str:
     usable = [c for c in claims if c.status is ClaimStatus.VERIFIED]
     return "\n".join(f"- [{c.repo}] {c.text}" for c in usable[:limit]) or "- (none)"
 
@@ -84,7 +84,8 @@ async def plan_one(client: GroqClient, score: RoleScore, claims: list[Claim],
         claims=_claims_digest(claims),
         max_steps=max_steps,
     )
-    obj, _usage = await client.structured(messages, _Plan, node="plan_improvements")
+    obj, _usage = await client.structured(messages, _Plan, node="plan_improvements",
+                                          max_tokens=2000)
 
     steps: list[PlanStep] = []
     for s in obj.steps[:max_steps]:
