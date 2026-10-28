@@ -15,6 +15,12 @@ re-score after one toggle               153 ms     exact
 mean-pool approximation                 1.15 ms    **sign wrong 6/20**
 ======================================  =========  ==================
 
+Cost scales with how much text each embedding carries, not just with the
+bullet count. On a real 662-word one-page resume with 15 bullets the same
+code takes 582 ms for one re-score and 5.4 s for a full attribution -- slower
+per bullet than the 20-bullet figures above, because every variant embeds the
+whole document.
+
 The approximation — embed each bullet once, mean-pool the kept ones, never
 re-embed — is 4,253x faster and was the obvious design. Measured against ground
 truth it scored Pearson 0.643 and agreed on *sign* for only 14 of 20 bullets,
@@ -106,7 +112,11 @@ def _score_from_parts(dense: float | None, text: str, jd_text: str,
 def rescore(doc: ResumeDoc, jd_text: str, *, required_skills: list[str] | None = None,
             preferred_skills: list[str] | None = None,
             use_dense: bool = True) -> tuple[float, dict]:
-    """Score the document as it currently stands. One embedding; ~153 ms."""
+    """Score the document as it currently stands.
+
+    One embedding of the whole document: 153 ms on the 20-bullet reference
+    resume, 582 ms on a real 662-word one-page resume.
+    """
     text = doc.as_text()
     corpus = list(background_corpus())
     dense = None

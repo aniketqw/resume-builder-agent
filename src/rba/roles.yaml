@@ -14,6 +14,11 @@ defaults:
     - migrated, optimised, optimized, reduced, scaled, deployed, instrumented
     - debugged, refactored, integrated, benchmarked, evaluated, profiled
     - developed, created, engineered, delivered, launched, maintained
+    # Added after a real resume was checked against this list: every one of
+    # these opened a genuine bullet and was wrongly reported as a weak opener.
+    - wrote, added, used, split, containerised, containerized, mentored
+    - measured, analysed, analyzed, trained, fine-tuned, extended, ported
+    - parallelised, parallelized, cached, verified, validated, documented
 
 roles:
   ai_llm_agent_engineer:

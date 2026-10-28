@@ -66,6 +66,13 @@ class Usage:
     total_tokens: int = 0
     reasoning_tokens: int = 0
     cached: bool = False
+    # Requests that actually hit the Groq API. This is the quantity the 1,000
+    # requests/day limit counts -- retries included, local cache hits excluded.
+    requests: int = 0
+    # Prompt tokens Groq served from its own prefix cache. Groq's docs say these
+    # are exempt from rate limits, so the billable-against-quota prompt total is
+    # `prompt_tokens - cached_tokens`.
+    cached_tokens: int = 0
 
     def __add__(self, other: Usage) -> Usage:
         return Usage(
@@ -73,6 +80,9 @@ class Usage:
             self.completion_tokens + other.completion_tokens,
             self.total_tokens + other.total_tokens,
             self.reasoning_tokens + other.reasoning_tokens,
+            self.cached or other.cached,
+            self.requests + other.requests,
+            self.cached_tokens + other.cached_tokens,
         )
 
 
@@ -204,6 +214,8 @@ class GroqClient:
                 completion_tokens=u.get("completion_tokens", 0),
                 total_tokens=u.get("total_tokens", 0),
                 reasoning_tokens=(u.get("completion_tokens_details") or {}).get("reasoning_tokens", 0),
+                requests=1,
+                cached_tokens=(u.get("prompt_tokens_details") or {}).get("cached_tokens", 0),
             )
             bucket.reconcile(est, usage.total_tokens, headers)
             self._record(node, usage)
@@ -279,5 +291,13 @@ class GroqClient:
 
     def usage_report(self) -> dict[str, dict[str, int]]:
         return {k: {"prompt": v.prompt_tokens, "completion": v.completion_tokens,
-                    "total": v.total_tokens, "reasoning": v.reasoning_tokens}
+                    "total": v.total_tokens, "reasoning": v.reasoning_tokens,
+                    "requests": v.requests, "cached_tokens": v.cached_tokens}
                 for k, v in self.usage_by_node.items()}
+
+    def usage_total(self) -> Usage:
+        """Every node summed -- the quantities the daily quotas are spent in."""
+        out = Usage()
+        for v in self.usage_by_node.values():
+            out = out + v
+        return out

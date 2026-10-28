@@ -1,0 +1,41 @@
+{
+  "measured": {
+    "user": "aniketqw",
+    "repos_summarised": 10,
+    "repos_found": 100,
+    "elapsed_s": 351.7,
+    "cold": true,
+    "requests": 10,
+    "tokens": 30587,
+    "prompt_tokens": 24054,
+    "cached_prompt_tokens": 768,
+    "by_node": {
+      "summarize_repo": {
+        "prompt": 24054,
+        "completion": 6533,
+        "total": 30587,
+        "reasoning": 767,
+        "requests": 10,
+        "cached_tokens": 768
+      }
+    }
+  },
+  "per_repo": {
+    "requests": 1.0,
+    "tokens": 3058.7
+  },
+  "projected": {
+    "repos": 110,
+    "requests": 110,
+    "tokens": 336457,
+    "pct_of_rpd": 11.0,
+    "pct_of_tpd_documented": 168.2,
+    "minutes_at_tpm_floor": 42.1
+  },
+  "limits": {
+    "rpd_header_confirmed": 1000,
+    "tpd_docs_only": 200000,
+    "tpm_header_confirmed": 8000
+  },
+  "fits_in_one_day": false
+}

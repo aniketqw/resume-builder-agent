@@ -1,12 +1,17 @@
 """Streamlit entry point. Run from the repository root.
 
-Three steps: get a resume (from GitHub or an upload), say what job it is for,
-then edit it while a grounded score moves.
+Start from the resume you already have, pull candidate lines out of your
+GitHub projects, and watch a grounded score move as you accept or reject them.
 
-The per-bullet +/- is the point of the thing. It is exact leave-one-out: each
-number is what the score really loses if you remove that line, verified in
-tests against an independent rescore. That is affordable only because scoring
-makes no LLM call -- one ONNX embedding plus arithmetic, ~150 ms per toggle.
+Two things make this different from the usual resume scorer:
+
+* **The +/- beside each line is exact.** It is leave-one-out: the score
+  genuinely recomputed without that line. Affordable only because scoring makes
+  no LLM call -- ONNX embeddings and arithmetic. Measured on a 662-word
+  one-page resume: 582 ms for one rescore, 5.4 s for all fifteen lines.
+* **Nothing is invented.** Generated lines arrive switched off and carry the
+  repository evidence they came from. Your own resume is the baseline and is
+  never rewritten.
 """
 from __future__ import annotations
 
@@ -21,80 +26,88 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from rba.ats.fusion import CHANNEL_WEIGHTS  # noqa: E402
-from rba.resume import (  # noqa: E402
-    ResumeDoc,
-    attribute,
-    build_from_github,
-    parse_resume_text,
+from rba.resume import ResumeDoc, attribute, build_from_github  # noqa: E402
+from rba.resume.diagnostics import diagnose  # noqa: E402
+from rba.resume.ingest import parse_resume  # noqa: E402
+from rba.resume.merge import baseline, candidates, merge_candidates  # noqa: E402
+from rba.resume.render import (  # noqa: E402
+    RenderOptions,
+    to_html,
+    to_latex,
+    to_pdf,
+    to_plain,
 )
+from rba.resume.render.options import ORIGIN_LABELS  # noqa: E402
+from rba.resume.render.pdf import pages_used  # noqa: E402
 from rba.scoring import load_roles  # noqa: E402
 
 st.set_page_config(page_title="Resume Builder — evidence-grounded",
                    page_icon="📄", layout="wide")
 
-SAMPLE_JD = """Backend Engineer
+SAMPLE_JD = """AI Engineer
 
-Required: Python, Docker, Kubernetes, REST APIs, SQL
-Preferred: AWS, Kafka, Terraform
+Required: Python, LangChain, LangGraph, RAG, evaluation, Docker
+Preferred: AWS, Kafka, vLLM, fine-tuning
 
-Design and operate microservices in production, own services end to end."""
+Build and evaluate LLM agent systems end to end: retrieval, tool use,
+guardrails, and measurement of cost and quality."""
+
+STATUS_ICON = {"ok": "\u2705", "warn": "\u26a0\ufe0f", "info": "\u2139\ufe0f"}
 
 
 def state():
     st.session_state.setdefault("doc", None)
     st.session_state.setdefault("stats", {})
     st.session_state.setdefault("attribution", None)
+    st.session_state.setdefault("baseline_score", None)
     return st.session_state
-
-
-def _roles() -> dict:
-    return load_roles()
 
 
 # ----------------------------------------------------------------- inputs --
 def sidebar() -> dict:
-    st.sidebar.header("1 · Where does the resume come from?")
-    source = st.sidebar.radio("Source", ["GitHub", "Paste or upload"],
-                              label_visibility="collapsed")
+    st.sidebar.header("1 · Your resume")
+    uploaded = st.sidebar.file_uploader(
+        "Upload a PDF, .txt or .md", type=["pdf", "txt", "md"],
+        help="A BITS-format PDF is parsed into its tables and dated entries. "
+             "Any other layout falls back to a simpler parser.")
+    pasted = st.sidebar.text_area("…or paste it", height=120)
 
-    config: dict = {"source": source}
-    if source == "GitHub":
+    st.sidebar.header("2 · Add from GitHub")
+    use_github = st.sidebar.checkbox(
+        "Pull candidate lines from my repositories", value=False,
+        help="Generated lines arrive switched off. Nothing is added to your "
+             "resume until you turn it on.")
+    config: dict = {"uploaded": uploaded, "pasted": pasted,
+                    "use_github": use_github}
+    if use_github:
         config["username"] = st.sidebar.text_input("GitHub username", "aniketqw")
         config["github_token"] = st.sidebar.text_input(
             "GitHub token", type="password",
-            help="Unauthenticated GitHub allows only 60 requests/hour, shared "
-                 "across everyone using this app. A token gives you 5,000 and "
-                 "spends your quota, not ours. Never stored.")
-        config["groq_key"] = st.sidebar.text_input(
-            "Groq API key", type="password",
-            help="Used to summarise your projects. Never stored.")
+            help="Without one GitHub allows 60 requests an hour, shared.")
+        config["groq_key"] = st.sidebar.text_input("Groq API key", type="password")
         config["max_repos"] = st.sidebar.slider(
-            "Repositories to describe", 2, 12, 5,
-            help="Groq's free tier allows 8,000 tokens a minute, so each repo "
-                 "costs real time. Five finishes in a couple of minutes.")
-    else:
-        uploaded = st.sidebar.file_uploader("Upload a resume (.txt or .md)",
-                                            type=["txt", "md"])
-        config["uploaded"] = uploaded
-        config["pasted"] = st.sidebar.text_area("…or paste it", height=200)
+            "Repositories to read", 1, 25, 6,
+            help="Measured at roughly 3,000 tokens and one request per "
+                 "repository. See evals/budget.md.")
 
-    st.sidebar.header("2 · What job is it for?")
-    mode = st.sidebar.radio("Target", ["Paste a job description",
-                                       "Pick a role archetype"],
+    st.sidebar.header("3 · Target")
+    roles = load_roles()
+    mode = st.sidebar.radio("Target", ["Paste a job description", "Pick a role"],
                             label_visibility="collapsed")
     if mode == "Paste a job description":
-        config["jd"] = st.sidebar.text_area("Job description", SAMPLE_JD,
-                                            height=180)
-        config["required"] = st.sidebar.text_input(
-            "Required skills", "Python, Docker, Kubernetes, REST API, SQL")
-        config["preferred"] = st.sidebar.text_input(
-            "Preferred skills", "AWS, Kafka, Terraform")
+        config["jd"] = st.sidebar.text_area("Job description", SAMPLE_JD, height=180)
+        config["required"] = st.sidebar.text_input("Required skills (comma separated)")
+        config["preferred"] = st.sidebar.text_input("Preferred skills")
+        config["role_key"] = st.sidebar.selectbox(
+            "Role profile for the advice panel", list(roles),
+            format_func=lambda k: roles[k].title)
     else:
-        roles = _roles()
         key = st.sidebar.selectbox("Role", list(roles),
                                    format_func=lambda k: roles[k].title)
         role = roles[key]
-        top = sorted(role.keywords, key=lambda k: -role.keywords[k])
+        top = [t for t, _ in sorted(role.keywords.items(),
+                                    key=lambda kv: -kv[1])]
+        config["role_key"] = key
         config["jd"] = f"{role.title}. {role.headline}. " + ", ".join(top[:18])
         config["required"] = ", ".join(top[:8])
         config["preferred"] = ", ".join(top[8:14])
@@ -143,7 +156,22 @@ def split(value: str) -> list[str]:
 # ------------------------------------------------------------------ build --
 def build(config: dict) -> None:
     store = state()
-    if config["source"] == "GitHub":
+    raw: bytes | str = ""
+    if config.get("uploaded") is not None:
+        raw = config["uploaded"].read()
+    elif config.get("pasted", "").strip():
+        raw = config["pasted"]
+
+    if raw:
+        store.doc = parse_resume(raw)
+    elif not config.get("use_github"):
+        st.error("Upload or paste a resume, or tick **Add from GitHub**.")
+        return
+    else:
+        store.doc = ResumeDoc()
+    store.stats = {}
+
+    if config.get("use_github"):
         if not config.get("username"):
             st.error("Enter a GitHub username.")
             return
@@ -153,10 +181,10 @@ def build(config: dict) -> None:
             bar.progress(min(max(fraction, 0.0), 1.0), text=message)
 
         try:
-            doc, stats = asyncio.run(build_from_github(
+            generated, stats = asyncio.run(build_from_github(
                 config["username"], github_token=config.get("github_token", ""),
                 groq_key=config.get("groq_key", ""),
-                max_repos=config.get("max_repos", 5), progress=report))
+                max_repos=config.get("max_repos", 6), progress=report))
         except Exception as exc:
             bar.empty()
             st.error(_diagnose(exc))
@@ -164,100 +192,257 @@ def build(config: dict) -> None:
                 st.code(f"{type(exc).__name__}: {exc}"[:800])
             return
         bar.empty()
-        store.doc, store.stats = doc, stats
-    else:
-        raw = ""
-        if config.get("uploaded") is not None:
-            raw = config["uploaded"].read().decode("utf-8", "replace")
-        raw = raw or config.get("pasted", "")
-        if not raw.strip():
-            st.error("Upload or paste a resume first.")
-            return
-        store.doc, store.stats = parse_resume_text(raw), {}
+        _report_partial_failures(stats)
+        if not store.doc.sections and not store.doc.name:
+            # Nothing to merge into: the generated document is the resume.
+            store.doc = generated
+            for bullet in store.doc.all_bullets():
+                bullet.origin = "repo"
+        else:
+            merge_candidates(store.doc, generated)
+        store.stats = stats
     store.attribution = None
+    store.baseline_score = None
+
+
+def _report_partial_failures(stats: dict) -> None:
+    """Say what went wrong per repository instead of returning a bare resume.
+
+    The failure that prompted this: an expired Groq key made every summary
+    return 401, and the app showed an empty document with no explanation.
+    """
+    errors = stats.get("errors") or []
+    if not errors:
+        return
+    joined = " ".join(errors).lower()
+    if "invalid_api_key" in joined or "invalid api key" in joined or "401" in joined:
+        st.error("Groq rejected the API key, so no repository could be "
+                 "summarised. Paste a current key in the sidebar — keys are "
+                 "revoked when they leak into a public repository.")
+    elif not stats.get("summarised"):
+        st.error("No repository could be summarised. The detail is below.")
+    else:
+        st.warning(f"{len(errors)} repository/repositories could not be read; "
+                   f"the rest were summarised.")
+    with st.expander(f"Detail ({len(errors)})"):
+        for line in errors[:20]:
+            st.code(_TOKENISH.sub("[redacted]", line)[:300], language="text")
 
 
 def recompute(config: dict) -> None:
     store = state()
     if store.doc is None:
         return
-    with st.spinner("Scoring every bullet…"):
-        store.attribution = attribute(
-            store.doc, config["jd"],
-            required_skills=split(config.get("required", "")),
-            preferred_skills=split(config.get("preferred", "")))
+    required, preferred = split(config.get("required", "")), \
+        split(config.get("preferred", ""))
+    with st.spinner("Scoring every line…"):
+        store.attribution = attribute(store.doc, config["jd"],
+                                      required_skills=required,
+                                      preferred_skills=preferred)
+        from rba.resume.attribution import rescore
+        base = baseline(store.doc)
+        raw, _ = rescore(base, config["jd"], required_skills=required,
+                         preferred_skills=preferred)
+        store.baseline_score = raw * 100 if base.enabled() else None
 
 
-# ------------------------------------------------------------------- view --
-def show_resume(config: dict) -> None:
+# ------------------------------------------------------------- left rail --
+def score_panel(config: dict) -> None:
+    store = state()
+    att = store.attribution
+    if att is None:
+        return
+
+    st.metric("Match score", f"{att.total:.1f}",
+              delta=(None if store.baseline_score is None
+                     else f"{att.total - store.baseline_score:+.1f} vs your "
+                          f"uploaded resume ({store.baseline_score:.0f})"))
+    st.caption(f"Band: **{att.band}** · fused across three channels. "
+               "Not an ATS number — no applicant tracking system shows one.")
+
+    st.markdown("##### Channels")
+    for name, value in (att.channels or {}).items():
+        st.progress(min(max(value, 0.0), 1.0), text=f"{name} · {value:.2f}")
+
+    if att.harmful():
+        st.markdown("##### Lines that are costing you")
+        st.caption("Removing these would *raise* the score against this job. "
+                   "A scorer that asks a model to guess an impact cannot "
+                   "tell you this.")
+        for impact in att.harmful()[:4]:
+            st.markdown(f"- :red[{impact.label}] {impact.text[:90]}…")
+
+    st.markdown("##### Advice")
+    st.caption("Not score components. The seven weighted bars this replaces "
+               "were invented; these are checks you can act on.")
+    role = load_roles()[config["role_key"]]
+    for finding in diagnose(store.doc, role):
+        icon = STATUS_ICON.get(finding.status, "·")
+        with st.expander(f"{icon} {finding.label}", expanded=False):
+            if finding.detail:
+                st.caption(finding.detail)
+            if finding.items:
+                st.write(", ".join(finding.items[:30])
+                         if len(" ".join(finding.items)) < 400
+                         else "\n".join(f"- {i}" for i in finding.items[:8]))
+
+    if store.stats:
+        s = store.stats
+        st.caption(
+            f"{s.get('claims_verified', 0)}/{s.get('claims_total', 0)} claims "
+            f"verified · {s.get('claims_rejected', 0)} refused · "
+            f"{s.get('groq_tokens', 0):,} Groq tokens")
+
+
+# ------------------------------------------------------------ right rail --
+def render_panel(config: dict) -> RenderOptions:
+    store = state()
+    doc: ResumeDoc = store.doc
+
+    controls = st.columns([1.3, 1, 1])
+    style = controls[0].radio("Format", ["BITS", "Clean"], horizontal=True,
+                              label_visibility="collapsed")
+    numbers = controls[1].toggle("Numbers", value=True,
+                                 help="Hide every figure to check the resume "
+                                      "still reads without them.")
+    provenance = controls[2].toggle("Provenance", value=False,
+                                    help="Colour each line by where it came from.")
+    opts = RenderOptions(style=style.lower(), show_numbers=numbers,
+                         colour_provenance=provenance)
+
+    if provenance:
+        st.caption(" · ".join(
+            f":{'green' if k == 'yours' else 'gray' if k == 'repo' else 'orange'}[{v}]"
+            for k, v in ORIGIN_LABELS.items()))
+
+    pdf = to_pdf(doc, opts)
+    pages = pages_used(pdf)
+    st.caption(f"{len(to_plain(doc, opts).split())} words · {pages} page"
+               + ("" if pages == 1 else "s")
+               + (" — shrunk to fit" if pages == 1 else ""))
+
+    downloads = st.columns(4)
+    downloads[0].download_button(f"{style} PDF", pdf,
+                                 file_name=f"resume_{style.lower()}.pdf",
+                                 mime="application/pdf", use_container_width=True)
+    downloads[1].download_button("LaTeX", to_latex(doc, opts),
+                                 file_name="resume.tex",
+                                 use_container_width=True)
+    downloads[2].download_button("Plain text", to_plain(doc, opts),
+                                 file_name="resume.txt",
+                                 use_container_width=True,
+                                 help="The ATS-safe version: no tables, no "
+                                      "columns, one bullet per line.")
+    downloads[3].download_button("JSON", doc.to_json(), file_name="resume.json",
+                                 use_container_width=True,
+                                 help="Everything, including evidence and "
+                                      "which lines are switched off.")
+
+    st.html(to_html(doc, opts))
+    return opts
+
+
+# ----------------------------------------------------------------- editor --
+def _origin_chip(origin: str) -> str:
+    colour = {"yours": "green", "repo": "gray", "assumed": "orange"}.get(origin, "gray")
+    return f":{colour}[{origin}]"
+
+
+def editor(config: dict) -> None:
     store = state()
     doc: ResumeDoc = store.doc
     att = store.attribution
+    new = candidates(doc)
+    if new:
+        st.info(f"{len(new)} candidate line(s) from your repositories, switched "
+                "off. Turn one on and the score moves by exactly the amount "
+                "shown beside it.")
 
-    head, meta = st.columns([3, 2])
-    with head:
-        doc.name = st.text_input("Name", doc.name)
-        doc.headline = st.text_input("Headline", doc.headline)
-        doc.contact = st.text_input("Contact", doc.contact)
-    with meta:
-        if att:
-            st.metric("Score", f"{att.total:.0f}", help="Fused across three "
-                                                        "channels; not an ATS number.")
-            st.metric("Band", att.band)
-        if store.stats:
-            s = store.stats
-            st.caption(
-                f"{s.get('claims_verified', 0)}/{s.get('claims_total', 0)} claims "
-                f"verified · {s.get('claims_rejected', 0)} refused · "
-                f"{s.get('groq_tokens', 0):,} Groq tokens")
-
-    if att and att.harmful():
-        st.warning("These lines are **lowering** your score against this job — "
-                   "consider removing them: "
-                   + "; ".join(f"“{i.text[:60]}” ({i.label})"
-                               for i in att.harmful()[:3]))
-
-    st.divider()
     for section in doc.sections:
-        st.subheader(section.title)
-        for bullet in section.bullets:
-            impact = att.by_id(bullet.id) if att else None
-            toggle, body, score = st.columns([0.6, 9, 1.6])
-            with toggle:
-                bullet.enabled = st.checkbox(
-                    "on", value=bullet.enabled, key=f"on_{bullet.id}",
-                    label_visibility="collapsed")
-            with body:
-                bullet.text = st.text_input(
-                    "bullet", bullet.text, key=f"tx_{bullet.id}",
-                    label_visibility="collapsed")
-                caption = []
-                if bullet.source_repo:
-                    caption.append(f"`{bullet.source_repo}`")
-                if not bullet.verified:
-                    caption.append("⚠ unverified — needs measuring")
-                if bullet.evidence:
-                    caption.append(f"evidence: “{bullet.evidence[:70]}”")
-                if caption:
-                    st.caption(" · ".join(caption))
-            with score:
-                if impact is None:
-                    st.caption("—")
-                elif impact.delta > 0:
-                    st.markdown(f"**:green[{impact.label}]**")
-                elif impact.delta < 0:
-                    st.markdown(f"**:red[{impact.label}]**")
-                else:
-                    st.caption("0.0")
+        if not (section.entries or section.bullets):
+            continue
+        st.markdown(f"#### {section.title}")
+        for entry in section.entries:
+            label = " — ".join(p for p in (entry.title, entry.subtitle) if p)
+            st.markdown(f"**{label}**  ·  {entry.dates}" if entry.dates
+                        else f"**{label}**")
+            _bullet_rows(entry.bullets, att)
+        _bullet_rows(section.bullets, att)
+
+
+def _bullet_rows(bullets, att) -> None:
+    for bullet in bullets:
+        impact = att.by_id(bullet.id) if att else None
+        toggle, body, score = st.columns([0.5, 9, 1.5])
+        with toggle:
+            bullet.enabled = st.checkbox(
+                "on", value=bullet.enabled, key=f"on_{bullet.id}",
+                label_visibility="collapsed")
+        with body:
+            bullet.text = st.text_input("bullet", bullet.text,
+                                        key=f"tx_{bullet.id}",
+                                        label_visibility="collapsed")
+            caption = [_origin_chip(bullet.origin)]
+            if bullet.source_repo:
+                caption.append(f"`{bullet.source_repo}`")
+            if not bullet.verified:
+                caption.append("⚠ needs measuring")
+            if bullet.evidence:
+                caption.append(f"evidence: “{bullet.evidence[:70]}”")
+            st.caption(" · ".join(caption))
+        with score:
+            if impact is None:
+                st.caption("—" if bullet.enabled else "off")
+            elif impact.delta > 0:
+                st.markdown(f"**:green[{impact.label}]**")
+            elif impact.delta < 0:
+                st.markdown(f"**:red[{impact.label}]**")
+            else:
+                st.caption("0.0")
+
+
+# ------------------------------------------------------------------- main --
+def main() -> None:
+    st.title("Resume Builder")
+    st.caption("Starts from the resume you already have, proposes lines drawn "
+               "from your repositories, and shows exactly what each one is "
+               "worth. Never claims anything your evidence does not support.")
+
+    config = sidebar()
+    if st.sidebar.button("Build", type="primary", use_container_width=True):
+        build(config)
+        if state().doc is not None:
+            recompute(config)
+
+    store = state()
+    if store.doc is None:
+        st.info("Upload your resume in the sidebar and press **Build**.")
+        st.markdown(
+            "- **Upload** a PDF and it is parsed into its real structure — "
+            "tables, dated entries, `Tech:` lines — not flattened to bullets.\n"
+            "- **Add from GitHub** reads your public repositories, summarises "
+            "each one, and discards any claim its evidence does not support.\n"
+            "- Candidate lines arrive **switched off**. Your resume is the "
+            "baseline and is never rewritten.")
+        return
+
+    left, right = st.columns([1, 1.45], gap="large")
+    with left:
+        score_panel(config)
+    with right:
+        render_panel(config)
 
     st.divider()
-    left, right = st.columns(2)
-    if left.button("Rescore after my edits", type="primary",
-                   use_container_width=True):
+    editor(config)
+
+    st.divider()
+    act = st.columns([1, 3])
+    if act[0].button("Rescore", type="primary", use_container_width=True):
         recompute(config)
         st.rerun()
-    right.download_button("Download resume (Markdown)", doc.as_markdown(),
-                          file_name="resume.md", use_container_width=True)
+    act[1].caption("Scoring makes no LLM call, so this costs no tokens. "
+                   "Measured on a 662-word resume: 582 ms for one rescore, "
+                   "5.4 s to attribute all fifteen lines.")
 
     with st.expander("How the number is produced"):
         st.markdown(
@@ -265,45 +450,17 @@ def show_resume(config: dict) -> None:
             "normalisation — **not** Reciprocal Rank Fusion, which Bruch et al. "
             "(arXiv 2210.11934, TOIS) beat with a weighted sum on all five "
             "datasets they tested.\n\n"
-            "The **+/- beside each bullet is exact**: it is the score with that "
-            "line removed, recomputed in full. Scoring makes no LLM call, so "
-            "this costs about 150 ms. An approximation would have been 4,253x "
-            "faster, but measured against ground truth it got the *sign* wrong "
-            "on 6 bullets in 20 — saying a line helped when it hurt — so it is "
-            "not used.\n\n"
-            "No applicant tracking system shows a candidate a 0-100 score. "
-            "Greenhouse reports Strong/Good/Partial, Workday reports A-D. This "
-            "is our number, which is why the formula is printed here.")
+            "The **+/- beside each line is exact**: the score with that line "
+            "removed, recomputed in full. An approximation would have been "
+            "4,253x faster, but measured against ground truth it got the "
+            "*sign* wrong on 6 bullets in 20 — saying a line helped when it "
+            "hurt — so it is not used.\n\n"
+            "The advice panel deliberately carries **no weights**. The seven "
+            "weighted bars it replaces summed to 100 by construction; nobody "
+            "measured that a missing phone number is worth six points.")
         st.code("\n".join(f"{name:<9} weight {weight}"
                           for name, weight in CHANNEL_WEIGHTS.items()),
                 language="text")
-
-
-# ------------------------------------------------------------------- main --
-def main() -> None:
-    st.title("Resume Builder")
-    st.caption("Builds a resume from your GitHub projects, then shows what "
-               "every line is actually worth. Never claims anything your "
-               "repositories do not support.")
-
-    config = sidebar()
-    if st.sidebar.button("Build resume", type="primary", use_container_width=True):
-        build(config)
-        if state().doc is not None:
-            recompute(config)
-
-    store = state()
-    if store.doc is None:
-        st.info("Choose a source in the sidebar and press **Build resume**.")
-        st.markdown(
-            "- **GitHub** reads your public repositories, summarises each one, "
-            "and drops any claim its evidence does not support.\n"
-            "- **Paste or upload** starts from a resume you already have.\n\n"
-            "Either way you get a per-line score showing exactly what each "
-            "bullet contributes."
-        )
-        return
-    show_resume(config)
 
 
 if __name__ == "__main__":

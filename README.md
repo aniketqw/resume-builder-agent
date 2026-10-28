@@ -9,9 +9,14 @@ with the formula printed on the page. No sign-up, no API key.
 > The app sleeps after 12 hours without traffic. A cold link shows a
 > "Yes, get this app back up!" button — click it and give it about 30 seconds.
 
-Reads a GitHub account, turns each repository into **evidence-backed facts**, and
-builds role-targeted resumes plus an improvement plan where every item points at a
-real file or commit.
+Starts from the resume you already have, reads a GitHub account, turns each
+repository into **evidence-backed facts**, and offers them as candidate lines
+you can accept one at a time -- each showing exactly what it is worth.
+
+Upload a PDF and it is parsed into its real structure (academic tables, dated
+entries, `Tech:` lines), re-rendered as a one-page PDF, LaTeX or ATS-safe text,
+and scored. Your resume is the baseline and is never rewritten: generated lines
+arrive switched off.
 
 The governing rule: **the agent never invents an achievement or a number.** A claim
 that cannot be traced to repository evidence is not softened or hedged — it is
@@ -174,9 +179,25 @@ only claims that already passed verification.
 
 These numbers were measured against the live API, not read off a pricing page.
 
-**The binding constraint is 8,000 tokens per minute**, not the 30 requests per
-minute. One full evidence-linked repo summary costs ~2,074 tokens, so the ceiling
-is roughly **3.8 repo summaries per minute**.
+**Tokens bind; requests do not.** Measured cold over 10 real repositories
+(`python scripts/measure_budget.py --repos 10 --cold`, full write-up in
+[`evals/budget.md`](evals/budget.md)): **1 request and 3,058 tokens per repo**,
+of which 79% is prompt. At one call per repo, even 110 repos is 110 requests --
+11% of the 1,000/day limit. It is the token budget that runs out.
+
+Two findings from that measurement worth stating plainly:
+
+- **Groq prefix caching never fired for us.** Identical system prefixes at 771,
+  1,461 and 2,841 tokens, and the real 631-token prompt sent five times back to
+  back, all returned `cached_tokens: 0`. Any plan that relies on cached tokens
+  being exempt from rate limits is unsupported on this account.
+- **There is no daily-token header.** Groq exposes only
+  `x-ratelimit-limit-requests: 1000` and `x-ratelimit-limit-tokens: 8000`. The
+  200,000/day figure is documented but not observable, so it cannot be verified
+  from a response.
+
+The 8,000 tokens-per-minute ceiling is real and is what produces the 429
+backoffs during a cold run.
 
 Measured on a real account (113 repos, 98 non-fork):
 
@@ -333,13 +354,22 @@ src/rba/
   schema.py       Pydantic -> Groq strict JSON schema
   cache.py        SQLite response cache
   github_tools.py MCP client (docker | remote | rest)
-  scoring.py      deterministic ATS rubric
+  scoring.py      keyword/number/verb detectors, reused by diagnostics
+  ats/            BM25 + ONNX dense + skills, convex fusion, calibration
+  resume/
+    document.py   Bullet/Entry/Table/KeyValues/Header -- the editable model
+    ingest.py     PDF -> structure, deterministic, no LLM
+    merge.py      generated lines as opt-in candidates
+    diagnostics.py  advice, deliberately carrying no invented weights
+    attribution.py  exact leave-one-out per-bullet impact
+    render/       plain, html, pdf (fpdf2), latex
   nodes/          one module per graph node
   roles.yaml      role definitions and keyword tables
   prompts/        versioned prompt files
 evals/            faithfulness + G-Eval judges, golden fixtures
 tests/            offline suite with fakes
-scripts/          secret scanner
+scripts/          secret scanner, token-budget measurement
+fixtures/         real extracted resume text, so parsing is tested offline
 ```
 
 ---
