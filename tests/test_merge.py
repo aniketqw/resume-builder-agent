@@ -150,3 +150,26 @@ def test_pipeline_surfaces_per_repo_errors_in_stats():
     assert 'stats["errors"]' in source, \
         "per-repo failures must reach the caller, not die in the node"
     assert 'stats["summarised"]' in source
+
+
+def test_the_baseline_is_the_resume_as_uploaded_not_as_edited(base):
+    """Switching off one of your own lines must not move the comparison point.
+
+    It did: `baseline()` carried the current toggles, so disabling an original
+    line disabled it in the baseline too and the delta reported ~0 on a
+    document that had changed.
+    """
+    from rba.resume.attribution import rescore
+
+    jd = "AI Engineer. Python, LangGraph, RAG, retrieval, evaluation, Docker."
+    as_uploaded, _ = rescore(baseline(base), jd)
+
+    target = base.all_bullets()[0]
+    base.toggle(target.id, False)
+    after_edit, _ = rescore(base, jd)
+    still_uploaded, _ = rescore(baseline(base), jd)
+
+    assert still_uploaded == pytest.approx(as_uploaded, abs=1e-9), \
+        "the baseline moved when the user edited their own resume"
+    assert after_edit != pytest.approx(as_uploaded, abs=1e-9), \
+        "the edited document should differ from the uploaded one"

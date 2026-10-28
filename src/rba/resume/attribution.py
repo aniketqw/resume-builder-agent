@@ -38,6 +38,7 @@ selection.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import lru_cache
 
 import numpy as np
 
@@ -96,6 +97,34 @@ class Attribution:
         return None
 
 
+@lru_cache(maxsize=8)
+def _jd_vector(jd_text: str) -> tuple[float, ...] | None:
+    """The job description's embedding, computed once per session.
+
+    Two separate wins, both measured on a 662-word resume:
+
+    * The job description does not change while the user edits, so re-embedding
+      it on every toggle is pure waste -- 10 ms of it.
+    * More importantly, the tokeniser pads a batch to its longest member. Sending
+      a short job description alongside a long resume pads it out to the resume's
+      length, so ``embed([doc, jd])`` cost 590 ms where ``embed([doc])`` alone
+      costs 291 ms and ``embed([jd])`` costs 10 ms. Splitting them is faster even
+      on the very first call.
+
+    Returned as a tuple because `lru_cache` needs a hashable value; callers turn
+    it back into an array.
+    """
+    vectors = embed([jd_text])
+    if vectors is None:
+        return None
+    return tuple(float(x) for x in vectors[0])
+
+
+def _jd_array(jd_text: str) -> np.ndarray | None:
+    cached = _jd_vector(jd_text)
+    return None if cached is None else np.asarray(cached, dtype=np.float32)
+
+
 def _score_from_parts(dense: float | None, text: str, jd_text: str,
                       skills: list[str], required: list[str],
                       preferred: list[str], corpus: list[str]) -> tuple[float, dict]:
@@ -114,16 +143,18 @@ def rescore(doc: ResumeDoc, jd_text: str, *, required_skills: list[str] | None =
             use_dense: bool = True) -> tuple[float, dict]:
     """Score the document as it currently stands.
 
-    One embedding of the whole document: 153 ms on the 20-bullet reference
-    resume, 582 ms on a real 662-word one-page resume.
+    One embedding of the whole document -- the job description's is cached, see
+    :func:`_jd_vector`. Measured on a real 662-word one-page resume: 291 ms,
+    down from 582 ms before the job description was split out of the batch.
     """
     text = doc.as_text()
     corpus = list(background_corpus())
     dense = None
     if use_dense and text.strip():
-        vectors = embed([text, jd_text])
-        if vectors is not None:
-            dense = max(0.0, float(np.dot(vectors[0], vectors[1])))
+        jd_vector = _jd_array(jd_text)
+        vectors = embed([text])
+        if vectors is not None and jd_vector is not None:
+            dense = max(0.0, float(np.dot(vectors[0], jd_vector)))
     raw, channels = _score_from_parts(
         dense, text, jd_text, doc.skills(),
         required_skills or [], preferred_skills or [], corpus)
@@ -154,11 +185,13 @@ def attribute(doc: ResumeDoc, jd_text: str, *,
 
     dense_values: list[float | None] = [None] * (len(enabled) + 1)
     if use_dense and full_text.strip():
-        vectors = embed([full_text, *variant_texts, jd_text])
-        if vectors is not None:
-            jd_vector = vectors[-1]
+        # The job description stays out of this batch: it would be padded up to
+        # the resume's length for no benefit, costing a whole extra slot.
+        jd_vector = _jd_array(jd_text)
+        vectors = embed([full_text, *variant_texts])
+        if vectors is not None and jd_vector is not None:
             dense_values = [max(0.0, float(np.dot(v, jd_vector)))
-                            for v in vectors[:-1]]
+                            for v in vectors]
 
     full_raw, channels = _score_from_parts(
         dense_values[0], full_text, jd_text, doc.skills(), required, preferred,

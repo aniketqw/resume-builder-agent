@@ -118,9 +118,14 @@ def adopted(doc: ResumeDoc) -> list[Bullet]:
 def baseline(doc: ResumeDoc) -> ResumeDoc:
     """A copy of the document as the user supplied it, with no candidates.
 
-    This is what "vs your uploaded resume" is measured against, so it has to be
-    reconstructed rather than remembered -- the user may have edited their own
-    bullets since the import, and the comparison should reflect that.
+    This is what "vs your uploaded resume" is measured against, so every line
+    the user arrived with is restored to *enabled* regardless of how they have
+    since toggled it. Keeping their current switches here was wrong: turning
+    off one of their own lines moved the baseline with it, so the comparison
+    reported no change on a document that had plainly changed.
+
+    Rebuilt rather than remembered, so that edits to the *wording* of an
+    original line are still reflected.
     """
     clone = ResumeDoc.from_dict(doc.to_dict())
     for section in clone.sections:
@@ -128,4 +133,6 @@ def baseline(doc: ResumeDoc) -> ResumeDoc:
         for entry in section.entries:
             entry.bullets = [b for b in entry.bullets if b.origin == "yours"]
         section.entries = [e for e in section.entries if e.bullets]
+    for bullet in clone.all_bullets():
+        bullet.enabled = True
     return clone
