@@ -1,0 +1,127 @@
+name: Deploy to Hugging Face
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'space/**'
+      - 'run.md'
+      - 'scripts/build_space.py'
+      - 'scripts/build_site.py'
+      - 'scripts/deploy_space.py'
+      - 'scripts/check_space.py'
+      - 'scripts/check_sample.py'
+      - 'tests/test_space_deploy.py'
+      - '.github/workflows/deploy-huggingface.yaml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: rba-huggingface-main
+  cancel-in-progress: false
+
+env:
+  HF_REPO_ID: Phoenix21/resume-builder-agent
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Use a temporary Hugging Face cache
+        run: echo "HF_HOME=$RUNNER_TEMP/huggingface" >> "$GITHUB_ENV"
+
+      - name: Mark the deployment pending
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              ...context.repo, sha: context.sha, state: 'pending',
+              context: 'Hugging Face / Space',
+              description: 'Building and deploying the Space',
+              target_url: `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
+
+      - name: Install build dependencies
+        run: python -m pip install --quiet 'huggingface_hub>=1.0' markdown httpx pytest
+
+      - name: Refuse to publish a sample naming a private repository
+        # The Space is public and the account has private repositories. This is
+        # the gate: it fails the build rather than leaking one.
+        run: python scripts/check_sample.py
+
+      - name: Verify no credential reached the tree
+        run: ./scripts/scan_secrets.sh
+
+      - name: Test the bundler and deployment planner
+        run: python -m pytest tests/test_space_deploy.py -q
+
+      - name: Re-render the static page from the committed sample
+        run: python scripts/build_site.py
+
+      - name: Fail if the rendered page is stale
+        # index.html is committed so it is reviewable; if rendering changes it,
+        # the commit did not include the regenerated page.
+        run: |
+          if ! git diff --quiet -- space/index.html; then
+            echo "::error::space/index.html is out of date. Run 'python scripts/build_site.py' and commit the result."
+            git diff --stat -- space/index.html
+            exit 1
+          fi
+
+      - name: Validate the deployment credential
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          if [[ -z "$HF_TOKEN" ]]; then
+            echo "::error::Add HF_TOKEN under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
+      - name: Stage the allowlisted bundle
+        run: python scripts/build_space.py --output "${{ runner.temp }}/rba-space"
+
+      - name: Publish changed files, creating the Space if needed
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          SOURCE_COMMIT: ${{ github.sha }}
+        run: python scripts/deploy_space.py --folder "${{ runner.temp }}/rba-space" --repo-id "$HF_REPO_ID"
+
+      - name: Wait for the Space and fetch the live page
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: python scripts/check_space.py --repo-id "$HF_REPO_ID"
+
+      - name: Save the health report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: huggingface-space-health
+          path: space-health.json
+          if-no-files-found: ignore
+
+      - name: Report the result on the commit
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          DEPLOY_JOB_STATUS: ${{ job.status }}
+        with:
+          script: |
+            const ok = process.env.DEPLOY_JOB_STATUS === 'success';
+            await github.rest.repos.createCommitStatus({
+              ...context.repo, sha: context.sha, state: ok ? 'success' : 'failure',
+              context: 'Hugging Face / Space',
+              description: ok ? 'Space is live and serving the expected page'
+                              : 'Deployment failed; inspect the workflow logs',
+              target_url: ok ? 'https://huggingface.co/spaces/Phoenix21/resume-builder-agent'
+                             : `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });

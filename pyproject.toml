@@ -53,7 +53,7 @@ ignore = [
 
 [tool.ruff.lint.isort]
 # `fakes` and `conftest` are test-local modules, not third-party packages.
-known-first-party = ["rba", "fakes"]
+known-first-party = ["rba", "fakes", "run_trace", "judge"]
 
 [tool.ruff.lint.per-file-ignores]
 # `doctor` is a diagnostic: it must report any provider failure, not raise.

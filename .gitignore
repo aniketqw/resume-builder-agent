@@ -25,3 +25,6 @@ checkpoints/
 fixtures/repos/
 
 .DS_Store
+
+# Space deploy artefacts
+space-health.json
