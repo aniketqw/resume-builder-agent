@@ -87,6 +87,21 @@ def test_bad_cards_are_rejected(broken, match):
         validate_card(broken)
 
 
+def test_an_overlong_short_description_is_rejected():
+    """The Hub enforces 60 characters and only says so at publish time, after
+    the bundle has already been built and uploaded."""
+    long_card = CARD.replace("sdk: static",
+                             "short_description: " + "x" * 61 + "\nsdk: static")
+    with pytest.raises(ValueError, match="short_description"):
+        validate_card(long_card)
+
+
+def test_a_short_description_at_the_limit_passes():
+    ok = CARD.replace("sdk: static",
+                      "short_description: " + "x" * 60 + "\nsdk: static")
+    validate_card(ok)
+
+
 def test_the_real_card_is_valid():
     validate_card((ROOT / "space" / "README.md").read_text())
 

@@ -31,6 +31,7 @@ ALLOWLIST = {
 }
 
 CARD_COLORS = {"red", "yellow", "green", "blue", "indigo", "purple", "pink", "gray"}
+SHORT_DESCRIPTION_MAX = 60
 CREDENTIAL = re.compile(r"\b(?:hf|gsk|lsv2_pt|ghp|gho|sk-ant)[_-][A-Za-z0-9_-]{16,}")
 TEXT_SUFFIXES = {".md", ".html", ".css", ".js", ".json", ".txt", ".py"}
 
@@ -54,6 +55,12 @@ def validate_card(text: str) -> None:
         if found and found.group(1) not in CARD_COLORS:
             raise ValueError(f"unsupported Hugging Face card colour for {field}: "
                              f"{found.group(1)}")
+    # The Hub rejects the whole commit over this, and only at publish time.
+    short = re.search(r"(?m)^short_description:\s*(.+?)\s*$", front)
+    if short and len(short.group(1)) > SHORT_DESCRIPTION_MAX:
+        raise ValueError(
+            f"short_description is {len(short.group(1))} characters; the Hub "
+            f"allows at most {SHORT_DESCRIPTION_MAX}")
 
 
 def build(repo_root: Path, output: Path) -> dict:

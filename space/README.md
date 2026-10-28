@@ -7,7 +7,7 @@ sdk: static
 app_file: index.html
 pinned: false
 license: mit
-short_description: Evidence-grounded resumes from GitHub. Never invents a number.
+short_description: Evidence-grounded resumes built from your GitHub repos
 ---
 
 # Resume Builder Agent
