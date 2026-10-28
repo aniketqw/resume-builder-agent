@@ -180,7 +180,7 @@ def test_merge_accumulates_errors_instead_of_overwriting():
     """Regression: `state |= update` replaced the previous `errors` list, so the
     run trace reported "no bullets dropped" on a run that dropped five. A trace
     that quietly loses failures is worse than no trace."""
-    from build_sample import merge
+    from run_trace import merge
 
     state = {"errors": ["summarize: boom"]}
     state = merge(state, {"resumes": {}, "errors": ["dropped bullet — invented 9,999"]})
@@ -189,7 +189,7 @@ def test_merge_accumulates_errors_instead_of_overwriting():
 
 
 def test_merge_still_replaces_non_error_keys():
-    from build_sample import merge
+    from run_trace import merge
 
     state = merge({"claims": [1, 2]}, {"claims": [3]})
     assert state["claims"] == [3]

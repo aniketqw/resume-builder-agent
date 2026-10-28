@@ -15,6 +15,23 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
+def merge(state: dict, update: dict) -> dict:
+    """Merge a node result, accumulating `errors` instead of overwriting them.
+
+    `state |= update` silently replaces the previous `errors` list, which made
+    the run trace report "no bullets dropped" on a run that dropped five. The
+    graph uses an `operator.add` reducer for this field; a plain script has to
+    do it by hand.
+
+    Lives here rather than in `build_sample.py` so it can be imported — and
+    tested — without pulling in the whole agent package.
+    """
+    errors = list(state.get("errors") or []) + list(update.get("errors") or [])
+    state |= update
+    state["errors"] = errors
+    return state
+
+
 @dataclass
 class Stage:
     name: str
