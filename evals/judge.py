@@ -95,10 +95,14 @@ VERDICT = (
 async def faithfulness(client: GroqClient, summary_text: str,
                        evidence: str, tier: str = "big") -> Faithfulness:
     """RAGAS-style faithfulness: supported atomic claims over total."""
+    # Every reserved token comes out of the same 8,000-per-minute budget, so
+    # these are sized to the payload. The global default of 2,500 is for
+    # summarization; a two-field verdict needs a fraction of that, and
+    # oversizing it throttled the harness to about three calls a minute.
     atomic, _ = await client.structured(
         [{"role": "system", "content": DECOMPOSE},
          {"role": "user", "content": summary_text}],
-        _Atomic, node="judge", tier=tier)
+        _Atomic, node="judge", tier=tier, max_tokens=1000)
     claims = [c for c in atomic.claims if c.strip()]
     if not claims:
         return Faithfulness(1.0, 0, 0)
@@ -108,7 +112,7 @@ async def faithfulness(client: GroqClient, summary_text: str,
             [{"role": "system", "content": VERDICT},
              {"role": "user",
               "content": f"EVIDENCE:\n{evidence}\n\nSTATEMENT:\n{statement}"}],
-            _Verdict, node="judge", tier=tier)
+            _Verdict, node="judge", tier=tier, max_tokens=400)
         return statement, verdict.supported
 
     results = []
@@ -136,7 +140,7 @@ async def g_eval(client: GroqClient, summary_text: str, evidence: str,
                  {"role": "user",
                   "content": f"EVIDENCE:\n{evidence[:4000]}\n\n"
                              f"SUMMARY:\n{summary_text}"}],
-                _Rating, node="judge", tier=tier,
+                _Rating, node="judge", tier=tier, max_tokens=400,
                 # Vary the sample so n>1 measures something.
                 temperature=0.0 if i == 0 else 0.4)
             samples.append(max(1, min(5, rating.score)))

@@ -125,6 +125,39 @@ def test_headers_override_local_accounting(clock):
     assert b.day_requests == 1
 
 
+async def test_header_override_expires_and_does_not_stall_the_run(clock):
+    """Regression: the header snapshot was cached forever.
+
+    After one response reported a low remaining-tokens figure, the limiter
+    believed it had no budget for the rest of the process and slept a full
+    minute before every subsequent call -- turning a 3-second eval into one
+    that never finished.
+    """
+    b = bucket(clock)
+    await b.reserve(100)
+    b.reconcile(100, 100, {"x-ratelimit-remaining-tokens": "200",
+                           "x-ratelimit-reset-tokens": "3s"})
+    # The header already accounts for the call we just made, so it is taken as-is.
+    assert b.tokens.remaining(clock()) == 200
+
+    # A big call cannot fit while the snapshot is current...
+    assert b.tokens.seconds_until_room(clock(), 5000) > 0
+    # ...and the wait is bounded by the reset, not a blanket 60 seconds.
+    assert b.tokens.seconds_until_room(clock(), 5000) <= 3.0
+
+    clock.advance(4)
+    # Once it expires, local accounting takes over and the budget is real again.
+    assert b.tokens.remaining(clock()) == pytest.approx(7900, abs=200)
+    assert await b.reserve(5000) == 0.0
+
+
+def test_override_is_never_trusted_beyond_a_minute(clock):
+    b = bucket(clock)
+    b.tokens.set_override(clock(), 10.0, resets_in=9999.0)
+    clock.advance(61)
+    assert b.tokens.remaining(clock()) == b.limits.tpm
+
+
 def test_header_remaining_requests_is_treated_as_daily(clock):
     b = bucket(clock)
     asyncio.run(b.reserve(100))

@@ -59,11 +59,34 @@ class DailyBudgetExhausted(RuntimeError):
 
 @dataclass
 class _Window:
-    """A rolling one-minute window of (timestamp, amount) events."""
+    """A rolling one-minute window of (timestamp, amount) events.
+
+    Response headers are more authoritative than local accounting, but only
+    for as long as they describe. ``x-ratelimit-remaining-tokens`` is a
+    snapshot of the current minute and the bucket refills after
+    ``x-ratelimit-reset-tokens``; an override that never expires is worse than
+    no override at all, because it pins the window at whatever the last
+    response reported. The limiter then concludes it has no budget and sleeps
+    a full minute before every subsequent call, indefinitely.
+    """
 
     limit: int
     events: list[tuple[float, float]] = field(default_factory=list)
-    override: float | None = None  # set from response headers
+    override: float | None = None       # from response headers
+    override_until: float = 0.0         # when that snapshot stops being true
+
+    def _active_override(self, now: float) -> float | None:
+        if self.override is None:
+            return None
+        if now >= self.override_until:
+            self.override = None        # expired: fall back to local accounting
+            return None
+        return self.override
+
+    def set_override(self, now: float, value: float, resets_in: float) -> None:
+        self.override = max(0.0, value)
+        # Never trust a snapshot for longer than the window it describes.
+        self.override_until = now + max(0.0, min(resets_in, 60.0))
 
     def prune(self, now: float) -> None:
         cutoff = now - 60.0
@@ -74,13 +97,14 @@ class _Window:
         return sum(a for _, a in self.events)
 
     def remaining(self, now: float) -> float:
-        if self.override is not None:
-            return self.override
+        override = self._active_override(now)
+        if override is not None:
+            return override
         return self.limit - self.used(now)
 
     def add(self, now: float, amount: float) -> None:
         self.events.append((now, amount))
-        if self.override is not None:
+        if self._active_override(now) is not None:
             self.override = max(0.0, self.override - amount)
 
     def adjust(self, now: float, delta: float) -> None:
@@ -88,13 +112,17 @@ class _Window:
         if self.events:
             t, a = self.events[-1]
             self.events[-1] = (t, max(0.0, a + delta))
-        if self.override is not None:
+        if self._active_override(now) is not None:
             self.override = max(0.0, self.override - delta)
 
     def seconds_until_room(self, now: float, need: float) -> float:
         """How long to wait before ``need`` units fit in the window."""
         if self.remaining(now) >= need:
             return 0.0
+        # If a header snapshot is what is blocking us, wait for it to expire
+        # rather than for local events that may not exist.
+        if self._active_override(now) is not None:
+            return max(0.0, self.override_until - now)
         self.prune(now)
         # Expire oldest events until enough room frees up.
         freed = 0.0
@@ -168,7 +196,8 @@ class ModelBucket:
         rem_t = h.get("x-ratelimit-remaining-tokens")
         if rem_t is not None:
             try:
-                self.tokens.override = float(rem_t)
+                resets_in = parse_reset(h.get("x-ratelimit-reset-tokens")) or 60.0
+                self.tokens.set_override(now, float(rem_t), resets_in)
             except ValueError:
                 pass
         rem_r = h.get("x-ratelimit-remaining-requests")
