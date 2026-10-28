@@ -78,7 +78,7 @@ def score_resume_against_jd(resume_text: str, jd_text: str, *,
     # and every term looks equally rare, which flattens the channel.
     background = list(corpus) if corpus else list(background_corpus())
     lexical = bm25_similarity(resume_text, jd_text,
-                              corpus=background + [jd_text, resume_text])
+                              corpus=[*background, jd_text, resume_text])
     present, missing = matched_terms(resume_text, jd_text)
 
     dense: float | None = None

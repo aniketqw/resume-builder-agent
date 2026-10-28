@@ -7,9 +7,9 @@ difference between a failing test and a blank public page.
 import pytest
 
 pytest.importorskip("streamlit")
-from streamlit.testing.v1 import AppTest  # noqa: E402
+from streamlit.testing.v1 import AppTest
 
-from rba.ats.fusion import CHANNEL_WEIGHTS  # noqa: E402
+from rba.ats.fusion import CHANNEL_WEIGHTS
 
 
 def _app() -> AppTest:

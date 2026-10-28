@@ -44,8 +44,8 @@ from .skills import weighted_jaccard
 __all__ = [
     "CHANNEL_WEIGHTS",
     "ChannelScores",
-    "ScoreReport",
     "FusedScore",
+    "ScoreReport",
     "bm25_similarity",
     "canonical",
     "convex_fuse",

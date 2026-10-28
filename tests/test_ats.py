@@ -228,7 +228,7 @@ def test_corpus_raises_bm25_for_a_relevant_resume():
     resume = "Built Python services with Docker and Kubernetes, exposing REST APIs."
     bare = bm25_similarity(resume, jd)
     backed = bm25_similarity(resume, jd,
-                             corpus=list(background_corpus()) + [jd, resume])
+                             corpus=[*background_corpus(), jd, resume])
     assert backed > bare
 
 
