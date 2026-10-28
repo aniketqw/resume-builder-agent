@@ -3,6 +3,10 @@ import json
 import httpx
 import pytest
 
+# MCP ships as a base dependency, but skip rather than error if an environment
+# somehow lacks it -- the REST backend still works without it.
+lcmcp = pytest.importorskip("langchain.mcp")
+
 from rba.config import Config
 from rba.github_tools import (
     MCP_TOOLS,
@@ -85,7 +89,6 @@ async def test_write_tools_abort_the_connection(monkeypatch):
             return [FakeTool("get_file_contents"), FakeTool("delete_file"),
                     FakeTool("push_files")]
 
-    import langchain.mcp as lcmcp
     monkeypatch.setattr(lcmcp, "MCPAdapter", lambda target: Adapter())
     with pytest.raises(RuntimeError, match="write tools"):
         await b.connect()
@@ -101,7 +104,6 @@ async def test_read_only_toolset_connects(monkeypatch):
             return [FakeTool(n) for n in
                     ("get_file_contents", "list_commits", "search_repositories")]
 
-    import langchain.mcp as lcmcp
     monkeypatch.setattr(lcmcp, "MCPAdapter", lambda target: Adapter())
     await b.connect()
     assert b.has_tool("file") and not b.has_tool("tree")

@@ -17,10 +17,11 @@ dependencies = [
   "pyyaml>=6.0",
   "python-dotenv>=1.0",
   "aiosqlite>=0.20",
+  # MCP is the default GitHub backend, not an optional extra.
+  "langchain[mcp]>=1.0",
 ]
 
 [project.optional-dependencies]
-mcp = ["langchain[mcp]>=1.0"]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "ruff>=0.6"]
 
 [project.scripts]
@@ -57,4 +58,5 @@ known-first-party = ["rba", "fakes"]
 [tool.ruff.lint.per-file-ignores]
 # `doctor` is a diagnostic: it must report any provider failure, not raise.
 "src/rba/cli.py" = ["BLE001"]
-"tests/*" = ["RUF059"]
+# importorskip must run before the modules it guards are imported.
+"tests/*" = ["RUF059", "E402"]

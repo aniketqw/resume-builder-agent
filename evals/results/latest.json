@@ -1,14 +1,73 @@
 {
  "aggregate": {
-  "claim_faithfulness": 1.0,
-  "faithfulness": 0.8264,
+  "faithfulness": 0.9184,
   "number_precision": 1.0,
-  "overall": 0.75,
-  "repos": 2,
-  "elapsed_s": 499.5,
-  "tokens": 50840
+  "overall": 0.7011,
+  "repos": 6,
+  "elapsed_s": 1401.2,
+  "tokens": 164889
  },
  "results": [
+  {
+   "repo": "lecturelens-research",
+   "claims_total": 9,
+   "claims_verified": 9,
+   "claims_rejected": 0,
+   "claims_needs_measure": 0,
+   "number_precision": 1.0,
+   "coverage": 1.0,
+   "declined": false,
+   "faithfulness": 1.0,
+   "atomic_claims": 22,
+   "unsupported": [],
+   "overall": 0.75
+  },
+  {
+   "repo": "AiAgnoSample",
+   "claims_total": 6,
+   "claims_verified": 6,
+   "claims_rejected": 0,
+   "claims_needs_measure": 0,
+   "number_precision": 1.0,
+   "coverage": 1.0,
+   "declined": false,
+   "faithfulness": 0.9412,
+   "atomic_claims": 17,
+   "unsupported": [
+    "The scattered data makes it hard to aggregate and verify facts."
+   ],
+   "overall": 0.7147
+  },
+  {
+   "repo": "AiAgentDemo",
+   "claims_total": 6,
+   "claims_verified": 6,
+   "claims_rejected": 0,
+   "claims_needs_measure": 0,
+   "number_precision": 1.0,
+   "coverage": 1.0,
+   "declined": false,
+   "faithfulness": 0.9167,
+   "atomic_claims": 12,
+   "unsupported": [
+    "Each function is wrapped with LangChain @tool decorators."
+   ],
+   "overall": 0.7
+  },
+  {
+   "repo": "spring-gemini-chat",
+   "claims_total": 6,
+   "claims_verified": 6,
+   "claims_rejected": 0,
+   "claims_needs_measure": 0,
+   "number_precision": 1.0,
+   "coverage": 1.0,
+   "declined": false,
+   "faithfulness": 1.0,
+   "atomic_claims": 15,
+   "unsupported": [],
+   "overall": 0.75
+  },
   {
    "repo": "chronosModelImprovement",
    "claims_total": 6,
@@ -18,16 +77,13 @@
    "number_precision": 1.0,
    "coverage": 1.0,
    "declined": false,
-   "claim_faithfulness": 1.0,
-   "claim_atomic": 10,
-   "unsupported": [],
    "faithfulness": 0.875,
    "atomic_claims": 16,
-   "unsupported_prose": [
+   "unsupported": [
     "The original Chronos model does not account for distance between data points.",
-    "The lack of distance awareness limits forecast accuracy of the original Chronos model."
+    "The original Chronos model's lack of distance awareness limits forecast accuracy."
    ],
-   "overall": 0.75
+   "overall": 0.675
   },
   {
    "repo": "AiTerminal",
@@ -38,16 +94,13 @@
    "number_precision": 1.0,
    "coverage": 1.0,
    "declined": false,
-   "claim_faithfulness": 1.0,
-   "claim_atomic": 4,
-   "unsupported": [],
    "faithfulness": 0.7778,
    "atomic_claims": 9,
-   "unsupported_prose": [
+   "unsupported": [
     "AiTerminal provides a terminal interface for interacting with an AI model.",
     "The program serves a web socket endpoint via the gin framework to communicate with an AI backend."
    ],
-   "overall": 0.75
+   "overall": 0.6167
   }
  ]
 }
