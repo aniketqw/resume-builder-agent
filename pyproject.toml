@@ -30,7 +30,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "ruff>=0.6"]
+# `markdown` renders the Hugging Face static page in scripts/build_site.py.
+# It was installed ad-hoc and silently dropped on the next sync, which
+# broke the deploy workflow's staleness check.
+dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "ruff>=0.6", "markdown>=3.5"]
 
 [project.scripts]
 rba = "rba.cli:app"
