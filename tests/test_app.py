@@ -111,3 +111,32 @@ def test_the_advice_panel_carries_no_invented_weights():
         " ".join(c.value for c in app.caption)
     assert "out of 100" not in text
     assert "Not score components" in text
+
+
+def test_clicking_a_point_moves_the_score_without_a_rescore_button():
+    """The whole point of the rewrite: a toggle is a control, not a form.
+
+    Untick a line and the score must change on that interaction alone -- no
+    'Rescore' press in between.
+    """
+    app = built_app(jd=BACKEND_JD)
+    before = next(m.value for m in app.metric if m.label == "Match score")
+    toggles = bullet_toggles(app)
+    assert toggles, "expected per-line checkboxes"
+    toggles[0].uncheck().run()
+    after = next(m.value for m in app.metric if m.label == "Match score")
+    assert before != after, f"score did not move on toggle ({before} -> {after})"
+
+
+def test_stale_deltas_are_marked_rather_than_silently_wrong():
+    """Per-line figures describe the document they were measured against.
+
+    After an edit they are shown with a '~' and a refresh offered, instead of
+    quietly presenting numbers for a resume the user has moved away from.
+    """
+    app = built_app(jd=BACKEND_JD)
+    bullet_toggles(app)[0].uncheck().run()
+    marked = [m.value for m in app.markdown if "~" in m.value and ":" in m.value]
+    labels = [b.label for b in app.button]
+    assert marked or "Refresh +/-" in labels, \
+        "edited document should mark its deltas stale"

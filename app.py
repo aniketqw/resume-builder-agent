@@ -8,7 +8,8 @@ Two things make this different from the usual resume scorer:
 * **The +/- beside each line is exact.** It is leave-one-out: the score
   genuinely recomputed without that line. Affordable only because scoring makes
   no LLM call -- ONNX embeddings and arithmetic. Measured on a 662-word
-  one-page resume: 582 ms for one rescore, 5.4 s for all fifteen lines.
+  one-page resume: 293 ms for one re-score, 4.8 s for all fifteen deltas.
+  So the score moves on every click; the per-line figures refresh on request.
 * **Nothing is invented.** Generated lines arrive switched off and carry the
   repository evidence they came from. Your own resume is the baseline and is
   never rewritten.
@@ -26,7 +27,15 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from rba.ats.fusion import CHANNEL_WEIGHTS  # noqa: E402
-from rba.resume import ResumeDoc, attribute, build_from_github  # noqa: E402
+from rba.config import Config  # noqa: E402
+from rba.groq_client import GroqClient  # noqa: E402
+from rba.nodes.variants import generate_variants  # noqa: E402
+from rba.resume import (  # noqa: E402
+    ResumeDoc,
+    attribute,
+    build_from_github,
+    rescore,
+)
 from rba.resume.diagnostics import diagnose  # noqa: E402
 from rba.resume.ingest import parse_resume  # noqa: E402
 from rba.resume.merge import baseline, candidates, merge_candidates  # noqa: E402
@@ -60,6 +69,8 @@ def state():
     st.session_state.setdefault("stats", {})
     st.session_state.setdefault("attribution", None)
     st.session_state.setdefault("baseline_score", None)
+    st.session_state.setdefault("attr_signature", None)
+    st.session_state.setdefault("variants", None)
     return st.session_state
 
 
@@ -229,48 +240,88 @@ def _report_partial_failures(stats: dict) -> None:
             st.code(_TOKENISH.sub("[redacted]", line)[:300], language="text")
 
 
+# ------------------------------------------------------------- scoring ----
+def _signature(doc: ResumeDoc) -> tuple:
+    """What the deltas were computed against.
+
+    Per-point deltas stay valid only while the set of enabled lines and their
+    wording are unchanged. Comparing this to the live document is how the UI
+    knows to label them as needing a refresh rather than quietly showing
+    numbers that describe a document the user has already edited away from.
+    """
+    return tuple((b.id, b.text, b.enabled) for b in doc.all_bullets())
+
+
+def sync_from_widgets(doc: ResumeDoc) -> None:
+    """Apply the widget state to the document before anything reads it.
+
+    Streamlit widgets keep their value in `session_state` under their key, and
+    `editor()` only copies that back onto the bullets when it runs -- which is
+    *after* the score is computed. Without this the score was always one click
+    behind: untick a line and nothing moved until the next interaction.
+    """
+    for bullet in doc.all_bullets():
+        enabled = st.session_state.get(f"on_{bullet.id}")
+        if enabled is not None:
+            bullet.enabled = enabled
+        text = st.session_state.get(f"tx_{bullet.id}")
+        if text is not None and text != bullet.text:
+            bullet.text = text
+
+
+def live_score(config: dict) -> tuple[float, dict]:
+    """The exact score of the document as it stands. One embedding, ~293 ms."""
+    store = state()
+    raw, channels = rescore(store.doc, config["jd"],
+                            required_skills=split(config.get("required", "")),
+                            preferred_skills=split(config.get("preferred", "")))
+    return raw * 100, channels
+
+
+def refresh_deltas(config: dict) -> None:
+    """Recompute every per-point delta. ~4.8 s, so never on a toggle."""
+    store = state()
+    store.attribution = attribute(
+        store.doc, config["jd"],
+        required_skills=split(config.get("required", "")),
+        preferred_skills=split(config.get("preferred", "")))
+    store.attr_signature = _signature(store.doc)
+
+
 def recompute(config: dict) -> None:
+    """Full refresh: deltas, and the baseline the headline delta compares to."""
     store = state()
     if store.doc is None:
         return
-    required, preferred = split(config.get("required", "")), \
-        split(config.get("preferred", ""))
     with st.spinner("Scoring every line…"):
-        store.attribution = attribute(store.doc, config["jd"],
-                                      required_skills=required,
-                                      preferred_skills=preferred)
-        from rba.resume.attribution import rescore
+        refresh_deltas(config)
         base = baseline(store.doc)
-        raw, _ = rescore(base, config["jd"], required_skills=required,
-                         preferred_skills=preferred)
+        raw, _ = rescore(base, config["jd"],
+                         required_skills=split(config.get("required", "")),
+                         preferred_skills=split(config.get("preferred", "")))
         store.baseline_score = raw * 100 if base.enabled() else None
 
 
 # ------------------------------------------------------------- left rail --
-def score_panel(config: dict) -> None:
+def score_panel(config: dict, score: float, channels: dict) -> None:
     store = state()
     att = store.attribution
-    if att is None:
-        return
 
-    st.metric("Match score", f"{att.total:.1f}",
+    st.metric("Match score", f"{score:.1f}",
               delta=(None if store.baseline_score is None
-                     else f"{att.total - store.baseline_score:+.1f} vs your "
+                     else f"{score - store.baseline_score:+.1f} vs your "
                           f"uploaded resume ({store.baseline_score:.0f})"))
-    st.caption(f"Band: **{att.band}** · fused across three channels. "
-               "Not an ATS number — no applicant tracking system shows one.")
+    st.caption("Recomputed in full on every click — not an estimate. "
+               "Fused across three channels; not an ATS number.")
 
-    st.markdown("##### Channels")
-    for name, value in (att.channels or {}).items():
+    for name, value in (channels or {}).items():
         st.progress(min(max(value, 0.0), 1.0), text=f"{name} · {value:.2f}")
 
-    if att.harmful():
+    if att and att.harmful():
         st.markdown("##### Lines that are costing you")
-        st.caption("Removing these would *raise* the score against this job. "
-                   "A scorer that asks a model to guess an impact cannot "
-                   "tell you this.")
+        st.caption("Removing these would *raise* the score against this job.")
         for impact in att.harmful()[:4]:
-            st.markdown(f"- :red[{impact.label}] {impact.text[:90]}…")
+            st.markdown(f"- :red[{impact.label}] {impact.text[:80]}…")
 
     st.markdown("##### Advice")
     st.caption("Not score components. The seven weighted bars this replaces "
@@ -286,26 +337,24 @@ def score_panel(config: dict) -> None:
                          if len(" ".join(finding.items)) < 400
                          else "\n".join(f"- {i}" for i in finding.items[:8]))
 
-    if store.stats:
-        s = store.stats
-        st.caption(
-            f"{s.get('claims_verified', 0)}/{s.get('claims_total', 0)} claims "
-            f"verified · {s.get('claims_rejected', 0)} refused · "
-            f"{s.get('groq_tokens', 0):,} Groq tokens")
+    if store.stats.get("credentials"):
+        with st.expander("Credentials"):
+            for line in store.stats["credentials"]:
+                st.caption(line)
 
 
 # ------------------------------------------------------------ right rail --
-def render_panel(config: dict) -> RenderOptions:
+def render_panel(config: dict) -> None:
     store = state()
     doc: ResumeDoc = store.doc
 
     controls = st.columns([1.3, 1, 1])
     style = controls[0].radio("Format", ["BITS", "Clean"], horizontal=True,
-                              label_visibility="collapsed")
-    numbers = controls[1].toggle("Numbers", value=True,
+                              label_visibility="collapsed", key="fmt")
+    numbers = controls[1].toggle("Numbers", value=True, key="nums",
                                  help="Hide every figure to check the resume "
                                       "still reads without them.")
-    provenance = controls[2].toggle("Provenance", value=False,
+    provenance = controls[2].toggle("Provenance", value=False, key="prov",
                                     help="Colour each line by where it came from.")
     opts = RenderOptions(style=style.lower(), show_numbers=numbers,
                          colour_provenance=provenance)
@@ -318,28 +367,23 @@ def render_panel(config: dict) -> RenderOptions:
     pdf = to_pdf(doc, opts)
     pages = pages_used(pdf)
     st.caption(f"{len(to_plain(doc, opts).split())} words · {pages} page"
-               + ("" if pages == 1 else "s")
-               + (" — shrunk to fit" if pages == 1 else ""))
+               + ("" if pages == 1 else "s"))
 
     downloads = st.columns(4)
     downloads[0].download_button(f"{style} PDF", pdf,
                                  file_name=f"resume_{style.lower()}.pdf",
                                  mime="application/pdf", use_container_width=True)
     downloads[1].download_button("LaTeX", to_latex(doc, opts),
-                                 file_name="resume.tex",
-                                 use_container_width=True)
+                                 file_name="resume.tex", use_container_width=True)
     downloads[2].download_button("Plain text", to_plain(doc, opts),
-                                 file_name="resume.txt",
-                                 use_container_width=True,
+                                 file_name="resume.txt", use_container_width=True,
                                  help="The ATS-safe version: no tables, no "
                                       "columns, one bullet per line.")
     downloads[3].download_button("JSON", doc.to_json(), file_name="resume.json",
                                  use_container_width=True,
                                  help="Everything, including evidence and "
                                       "which lines are switched off.")
-
     st.html(to_html(doc, opts))
-    return opts
 
 
 # ----------------------------------------------------------------- editor --
@@ -348,29 +392,45 @@ def _origin_chip(origin: str) -> str:
     return f":{colour}[{origin}]"
 
 
-def editor(config: dict) -> None:
+def _delta_cell(impact, stale: bool, enabled: bool) -> None:
+    if impact is None:
+        st.caption("—" if enabled else "off")
+        return
+    mark = "~" if stale else ""
+    if impact.delta > 0:
+        st.markdown(f"**:green[{mark}{impact.label}]**")
+    elif impact.delta < 0:
+        st.markdown(f"**:red[{mark}{impact.label}]**")
+    else:
+        st.caption(f"{mark}0.0")
+
+
+def _suggestion(bullet) -> None:
+    """Offer the best verified rewrite of this line, with its measured gain.
+
+    The gain is not the model's opinion. Every rewrite was substituted into the
+    document and re-scored, and any rewrite that introduced a number, a
+    technology or an outcome its evidence does not support was rejected before
+    it ever got scored.
+    """
     store = state()
-    doc: ResumeDoc = store.doc
-    att = store.attribution
-    new = candidates(doc)
-    if new:
-        st.info(f"{len(new)} candidate line(s) from your repositories, switched "
-                "off. Turn one on and the score moves by exactly the amount "
-                "shown beside it.")
-
-    for section in doc.sections:
-        if not (section.entries or section.bullets):
-            continue
-        st.markdown(f"#### {section.title}")
-        for entry in section.entries:
-            label = " — ".join(p for p in (entry.title, entry.subtitle) if p)
-            st.markdown(f"**{label}**  ·  {entry.dates}" if entry.dates
-                        else f"**{label}**")
-            _bullet_rows(entry.bullets, att)
-        _bullet_rows(section.bullets, att)
+    variants = store.variants
+    if variants is None:
+        return
+    best = variants.best(bullet.id)
+    if best is None or best.gain <= 0:
+        return
+    with st.container(border=True):
+        st.caption(f"Suggested rewrite · :green[{best.gain:+.1f}] measured")
+        st.markdown(best.text)
+        if st.button("Use this wording", key=f"use_{bullet.id}",
+                     use_container_width=False):
+            bullet.text = best.text
+            st.session_state[f"tx_{bullet.id}"] = best.text
+            st.rerun(scope="fragment")
 
 
-def _bullet_rows(bullets, att) -> None:
+def _bullet_rows(bullets, att, stale: bool) -> None:
     for bullet in bullets:
         impact = att.by_id(bullet.id) if att else None
         toggle, body, score = st.columns([0.5, 9, 1.5])
@@ -391,14 +451,111 @@ def _bullet_rows(bullets, att) -> None:
                 caption.append(f"evidence: “{bullet.evidence[:70]}”")
             st.caption(" · ".join(caption))
         with score:
-            if impact is None:
-                st.caption("—" if bullet.enabled else "off")
-            elif impact.delta > 0:
-                st.markdown(f"**:green[{impact.label}]**")
-            elif impact.delta < 0:
-                st.markdown(f"**:red[{impact.label}]**")
-            else:
-                st.caption("0.0")
+            _delta_cell(impact, stale, bullet.enabled)
+        if bullet.enabled:
+            _suggestion(bullet)
+
+
+def suggest_rewrites(config: dict) -> None:
+    """Ask one worker per project for rephrasings, then measure them here.
+
+    This is the only control on the page that spends tokens, which is why it is
+    a button and not automatic: one structured call per project, so a
+    four-project resume costs four requests against a measured budget of ~3,058
+    tokens per call (`evals/budget.md`). The scoring and the verification that
+    follow are pure Python.
+    """
+    store = state()
+    try:
+        with st.spinner("Rewriting each line, then measuring every rewrite…"):
+            async def run():
+                async with GroqClient(
+                        Config.load(),
+                        api_key=config.get("groq_key") or None) as client:
+                    return await generate_variants(
+                        store.doc, config["jd"], client=client,
+                        required_skills=split(config.get("required", "")),
+                        preferred_skills=split(config.get("preferred", "")))
+
+            store.variants = asyncio.run(run())
+    except Exception as exc:
+        st.error(_diagnose(exc))
+        return
+    kept, rejected = store.variants.kept(), store.variants.rejected()
+    st.success(f"{len(kept)} rewrite(s) kept, {len(rejected)} rejected for "
+               "claiming something the evidence does not support.")
+
+
+def editor(config: dict, stale: bool) -> None:
+    store = state()
+    doc: ResumeDoc = store.doc
+    att = store.attribution
+    new = candidates(doc)
+    if new:
+        st.caption(f"{len(new)} candidate line(s) from your repositories, "
+                   "switched off. Turn one on and the score above moves "
+                   "immediately.")
+
+    for section in doc.sections:
+        if not (section.entries or section.bullets):
+            continue
+        st.markdown(f"#### {section.title}")
+        for entry in section.entries:
+            label = " — ".join(p for p in (entry.title, entry.subtitle) if p)
+            st.markdown(f"**{label}**  ·  {entry.dates}" if entry.dates
+                        else f"**{label}**")
+            _bullet_rows(entry.bullets, att, stale)
+        _bullet_rows(section.bullets, att, stale)
+
+
+# -------------------------------------------------------------- workspace --
+@st.fragment
+def workspace(config: dict) -> None:
+    """Everything that reacts to a click, in one fragment.
+
+    Streamlit reruns the whole script on any widget change, which meant a
+    toggle redrew the sidebar, the uploader and the downloads before the score
+    moved. Keeping the checkboxes, the score and the preview inside a single
+    `st.fragment` scopes that rerun to this function, so a click costs one
+    document embedding (~293 ms measured) and nothing else.
+    """
+    store = state()
+    sync_from_widgets(store.doc)
+    score, channels = live_score(config)
+    stale = store.attr_signature != _signature(store.doc)
+
+    left, right = st.columns([1, 1.45], gap="large")
+    with left:
+        score_panel(config, score, channels)
+    with right:
+        render_panel(config)
+
+    st.divider()
+    if stale and store.attribution is not None:
+        bar = st.columns([3, 1])
+        bar[0].caption("The per-line +/- figures below were measured against "
+                       "an earlier version of this resume — shown with `~`. "
+                       "The score above is always current.")
+        if bar[1].button("Refresh +/-", use_container_width=True):
+            with st.spinner("Re-measuring every line…"):
+                refresh_deltas(config)
+            st.rerun(scope="fragment")
+
+    controls = st.columns([1.1, 3])
+    if controls[0].button("Suggest better wording", use_container_width=True,
+                          help="One model call per project. Every rewrite is "
+                               "then verified against its evidence and scored "
+                               "by real re-scoring."):
+        suggest_rewrites(config)
+    if store.variants is not None:
+        rejected = store.variants.rejected()
+        controls[1].caption(
+            f"{len(store.variants.kept())} verified rewrite(s) available · "
+            f"{len(rejected)} rejected for claiming something unsupported"
+            if rejected else
+            f"{len(store.variants.kept())} verified rewrite(s) available")
+
+    editor(config, stale)
 
 
 # ------------------------------------------------------------------- main --
@@ -423,26 +580,11 @@ def main() -> None:
             "- **Add from GitHub** reads your public repositories, summarises "
             "each one, and discards any claim its evidence does not support.\n"
             "- Candidate lines arrive **switched off**. Your resume is the "
-            "baseline and is never rewritten.")
+            "baseline and is never rewritten.\n"
+            "- Tick or untick any line and the score moves immediately.")
         return
 
-    left, right = st.columns([1, 1.45], gap="large")
-    with left:
-        score_panel(config)
-    with right:
-        render_panel(config)
-
-    st.divider()
-    editor(config)
-
-    st.divider()
-    act = st.columns([1, 3])
-    if act[0].button("Rescore", type="primary", use_container_width=True):
-        recompute(config)
-        st.rerun()
-    act[1].caption("Scoring makes no LLM call, so this costs no tokens. "
-                   "Measured on a 662-word resume: 582 ms for one rescore, "
-                   "5.4 s to attribute all fifteen lines.")
+    workspace(config)
 
     with st.expander("How the number is produced"):
         st.markdown(
@@ -450,11 +592,20 @@ def main() -> None:
             "normalisation — **not** Reciprocal Rank Fusion, which Bruch et al. "
             "(arXiv 2210.11934, TOIS) beat with a weighted sum on all five "
             "datasets they tested.\n\n"
-            "The **+/- beside each line is exact**: the score with that line "
-            "removed, recomputed in full. An approximation would have been "
-            "4,253x faster, but measured against ground truth it got the "
-            "*sign* wrong on 6 bullets in 20 — saying a line helped when it "
-            "hurt — so it is not used.\n\n"
+            "**Every number here is measured, never estimated.** The score "
+            "recomputes in full on each click (~293 ms: one document "
+            "embedding, with the job description's cached). The per-line +/- "
+            "is exact leave-one-out — the score with that line removed — which "
+            "costs ~4.8 s for a fifteen-line resume, so it refreshes on "
+            "request rather than on every click.\n\n"
+            "An approximation would have been 4,253x faster, but measured "
+            "against ground truth it got the *sign* wrong on 6 lines in 20 — "
+            "saying a line helped when it hurt — so it is not used.\n\n"
+            "The per-line figures do **not** sum to the total. The score is "
+            "non-linear: BM25 saturates and cosine normalises by length, so "
+            "contributions are not additive. Each delta answers only *“what "
+            "happens if I remove this line”* — which is exactly what the "
+            "checkbox does.\n\n"
             "The advice panel deliberately carries **no weights**. The seven "
             "weighted bars it replaces summed to 100 by construction; nobody "
             "measured that a missing phone number is worth six points.")
