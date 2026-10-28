@@ -34,9 +34,9 @@ Engineer, Acme Ltd, Jan 2021 - Present
 
 
 def _extraction(**kw) -> Extraction:
-    base = dict(name="Jane Doe", headline="Software Engineer",
-                email="jane@example.com", summary="", skills=[], work=[],
-                education=[])
+    base = {"name": "Jane Doe", "headline": "Software Engineer",
+            "email": "jane@example.com", "summary": "", "skills": [],
+            "work": [], "education": []}
     base.update(kw)
     return Extraction(**base)
 
