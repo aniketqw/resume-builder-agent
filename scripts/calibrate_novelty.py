@@ -66,7 +66,7 @@ def main() -> int:
                 for a, b in itertools.combinations(real, 2)]
 
     print("same claim, reworded (must be caught):")
-    for (c, o), (a, _b) in zip(dup, pairs):
+    for (c, o), (a, _b) in zip(dup, pairs, strict=True):
         caught = c >= DUPLICATE_COSINE or o >= DUPLICATE_OVERLAP
         print(f"  {'OK ' if caught else 'MISS'}  cos {c:.3f}  overlap {o:.3f}  {a[:48]}")
 
