@@ -2525,6 +2525,67 @@ behind a button.
 
 ---
 
+## ccb8451 — feat: click a line's score to try to fix that line   2026-10-29
+
+**Problem** The per-line figure could tell you a line was costing you points
+and then offer nothing. A diagnosis with no treatment.
+
+**Decision** Make the figure itself the control. Clicking it spends one model
+call on that line alone.
+
+**Design detail that matters** `improve_bullet` builds a single-bullet fan-out
+unit that **inherits its parent project's title and `Tech:` list**. Without
+that inheritance the guard would reject an honest rewrite for naming the
+project's own technology — the evidence for "PyTorch" lives on the entry, not
+in the bullet's own sentence. It also asks for five rewrites rather than three,
+because the reason somebody clicks this is usually that the line is hurting,
+and three attempts is a thin search.
+
+Everything after generation is the shared path — same `reject_reason`, same
+real re-scoring — so a gain shown here means what it means everywhere else.
+
+**Measured** 1 request, 1,055 tokens, 4 s.
+
+**The finding that changed the feature** Tested on the line that prompted it.
+Against an AI-engineering job description:
+
+```
+-0.1   Built a PyTorch Lightning callback pipeline that logs CIFAR-10
+       misclassifications and clusters them by distortion type...
+
++0.02  Created a PyTorch Lightning callback pipeline to log CIFAR-10...
++0.02  Designed a PyTorch Lightning callback pipeline that logs CIFAR-10...
++0.02  Developed a PyTorch Lightning callback pipeline that captures...
++0.02  Implemented a PyTorch Lightning callback pipeline that records...
++0.02  Built a PyTorch Lightning callback pipeline to record CIFAR-10...
+```
+
+Five rewrites, all beating the original, all by **+0.02** — moving −0.1 to
+about −0.08. The line does not score badly because of how it is written. It
+scores badly because computer-vision work on CIFAR-10 is semantically distant
+from an agents-and-retrieval job, and no verb swap closes that gap.
+
+**So the feature says so.** When the best rewrite cannot cover what the line is
+losing, the panel states it: rewording changes how a line is phrased, not what
+it is about, and the real options are to switch the line off or keep it because
+it is true and matters for reasons the job description cannot see. Five green
+numbers implying the problem was solved would have been the dishonest build.
+Rewrites that fail to beat the original are shown with their real negative
+number rather than hidden, and rejected ones stay visible with their reason.
+
+**Caught before shipping** Every `st.rerun` inside the fragment was
+fragment-scoped, which **crashed on the very first click**:
+`StreamlitInvalidLayoutContextError`. The workspace fragment also executes
+during the initial full script pass, and a fragment-scoped rerun is legal only
+*during* a fragment rerun. No test that merely rendered the page could see it —
+it needed a click. There is now a source-level guard, because reproducing it
+live costs a network call.
+
+**Files** `src/rba/nodes/variants.py`, `app.py`, `tests/test_app.py`,
+`tests/test_variants.py`
+
+---
+
 ## 7d085fd — docs: TRACE.md   2026-10-29
 
 Everything above this section, reconstructed; everything in Session 2, recorded
@@ -2746,13 +2807,13 @@ In the interest of the rule this project runs on, the gaps:
   construction is documented; their adequacy is not measured against anything
   external, and `build_calibration.py` says as much.
 - The README stated **185 tests** when this was written; the suite now reports
-  **439 passing**, confirmed by `pytest -p no:warnings` at the close of
+  **443 passing**, confirmed by `pytest -p no:warnings` at the close of
   session 2.
 
 ---
 
-*Compiled from 44 commits — the first 38 reconstructed from their diffs and
-the module docstrings, the last six recorded as the work happened — together
+*Compiled from 45 commits — the first 38 reconstructed from their diffs and
+the module docstrings, the last seven recorded as the work happened — together
 with `README.md`,
 `run.md`, `evals/budget.md` and `evals/budget.json` in this repository. Every
 number above is quoted from one of those sources. Where no source recorded a
