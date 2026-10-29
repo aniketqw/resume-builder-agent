@@ -310,6 +310,53 @@ async def propose_for_project(client: GroqClient, project: Project, *,
     return out
 
 
+def project_for(doc: ResumeDoc, bullet_id: str) -> Project | None:
+    """The fan-out unit a given bullet belongs to, for its tech and title."""
+    for project in projects(doc):
+        if any(b.id == bullet_id for b in project.bullets):
+            return project
+    return None
+
+
+async def improve_bullet(doc: ResumeDoc, jd_text: str, bullet_id: str, *,
+                         client: GroqClient, config: Config | None = None,
+                         required_skills: list[str] | None = None,
+                         preferred_skills: list[str] | None = None,
+                         k: int = 5, tier: str = "small",
+                         use_dense: bool = True) -> VariantSet:
+    """Rewrite one line, on demand, and measure every rewrite.
+
+    The whole-document pass asks for three rewrites of every bullet at once.
+    This spends an entire call on a single line, so it asks for more of them --
+    the usual reason somebody wants this is that the line is *costing* them
+    points, and a line that is hurting needs more than three attempts to find
+    one that helps.
+
+    Everything after generation is the shared path: the same `reject_reason`
+    guard and the same real re-scoring, so a gain shown here means exactly what
+    it means everywhere else.
+    """
+    cfg = config or Config.load()
+    tier = cfg.get("routing.rephrase_bullets", tier)
+    bullet = doc.by_id(bullet_id)
+    if bullet is None:
+        raise KeyError(f"no bullet {bullet_id!r}")
+
+    parent = project_for(doc, bullet_id)
+    focused = Project(key=f"{(parent.key if parent else 'bullet')}!{bullet_id}",
+                      title=parent.title if parent else "",
+                      tech=parent.tech if parent else (),
+                      bullets=(bullet,))
+    proposals = await propose_for_project(
+        client, focused,
+        keywords=list(required_skills or []) + list(preferred_skills or []),
+        k=k, tier=tier)
+    return score_variants(doc, jd_text, proposals,
+                          required_skills=required_skills,
+                          preferred_skills=preferred_skills,
+                          use_dense=use_dense)
+
+
 async def generate_variants(doc: ResumeDoc, jd_text: str, *, client: GroqClient,
                             config: Config | None = None,
                             required_skills: list[str] | None = None,

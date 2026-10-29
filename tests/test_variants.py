@@ -312,3 +312,61 @@ def test_an_honest_rephrase_of_a_real_bullet_survives():
             "a human-review interrupt, reading GitHub through the read-only MCP "
             "server.")
     assert reject_reason(kept, _real_bullet()) == ""
+
+
+# -- rewriting one line on demand ------------------------------------------
+def test_improve_bullet_spends_one_call_on_one_line():
+    """The per-line control is a dedicated call, so it asks for more attempts."""
+    import asyncio
+
+    from rba.nodes.variants import improve_bullet, project_for
+    from rba.resume.document import Bullet, Entry, ResumeDoc, Section
+
+    doc = ResumeDoc(sections=[Section("PROJECTS", entries=[Entry(
+        title="VisionDev", tech=["PyTorch"],
+        bullets=[Bullet("Built a PyTorch pipeline that logs misclassifications.",
+                        evidence="PyTorch pipeline logs misclassifications"),
+                 Bullet("Used a model to turn clusters into reports.",
+                        evidence="model turns clusters into reports")])])])
+    target = doc.all_bullets()[0]
+
+    # The focused unit must carry the parent's tech, or an honest rewrite using
+    # the project's own technology would be rejected as an invention.
+    parent = project_for(doc, target.id)
+    assert parent is not None and "PyTorch" in parent.tech
+
+    payload = {"bullets": [{"index": 1, "variants": [
+        "Engineered a PyTorch pipeline that records misclassifications.",
+        "Developed a PyTorch pipeline logging misclassifications.",
+    ]}]}
+    fake = FakeGroq([chat_response(json.dumps(payload))])
+
+    async def run():
+        async with _client(fake) as c:
+            return await improve_bullet(doc, "PyTorch engineer wanted.",
+                                        target.id, client=c, use_dense=False)
+
+    result = asyncio.run(run())
+    assert len(fake.requests) == 1, "one line should cost exactly one request"
+    variants = result.by_bullet.get(target.id, [])
+    assert variants, "expected rewrites for the targeted line"
+    assert all(v.bullet_id == target.id for v in variants), \
+        "a focused call must not return rewrites for other lines"
+
+
+def test_improve_bullet_rejects_an_unknown_line():
+    import asyncio
+
+    import pytest as _pytest
+
+    from rba.nodes.variants import improve_bullet
+    from rba.resume.document import Bullet, ResumeDoc, Section
+
+    doc = ResumeDoc(sections=[Section("X", bullets=[Bullet("A thing.")])])
+
+    async def run():
+        await improve_bullet(doc, "jd", "nosuchid", client=None,
+                             use_dense=False)
+
+    with _pytest.raises(KeyError):
+        asyncio.run(run())

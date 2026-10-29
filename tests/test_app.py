@@ -57,18 +57,31 @@ def test_pasted_resume_becomes_an_editable_scored_document():
     assert len(bullet_toggles(app)) == 3
 
 
+def delta_buttons(app) -> list:
+    """The per-line +/- figures, which are clickable controls."""
+    return [b for b in app.button if (b.key or "").startswith("fix_")]
+
+
 def test_every_bullet_shows_a_signed_impact():
     app = built_app()
-    deltas = [m.value for m in app.markdown if m.value.startswith("**:")]
+    deltas = [b.label for b in delta_buttons(app)]
     assert len(deltas) >= 3
     assert all(("+" in d) or ("-" in d) for d in deltas)
+
+
+def test_the_delta_is_clickable_so_a_bad_line_can_be_acted_on():
+    """A number that says a line hurts, with no way to fix it, is half a feature."""
+    app = built_app(jd=BACKEND_JD)
+    negative = [b for b in delta_buttons(app) if "-" in b.label]
+    assert negative, "expected at least one line scoring negative"
+    assert all(b.help for b in negative), "the control should explain itself"
 
 
 def test_an_irrelevant_bullet_is_flagged_as_harmful():
     """Against a backend job description, an office-social-committee line
     lowers the score. A grounded scorer can say so; a guessed one cannot."""
     app = built_app(jd=BACKEND_JD)
-    red = [m.value for m in app.markdown if ":red[" in m.value]
+    red = [b.label for b in app.button if ":red[" in (b.label or "")]
     assert red, "expected at least one negative-impact bullet"
     headings = [m.value for m in app.markdown]
     assert any("costing you" in h for h in headings), \
@@ -140,3 +153,24 @@ def test_stale_deltas_are_marked_rather_than_silently_wrong():
     labels = [b.label for b in app.button]
     assert marked or "Refresh +/-" in labels, \
         "edited document should mark its deltas stale"
+
+
+def test_no_fragment_scoped_reruns():
+    """`st.rerun(scope="fragment")` crashed on the very first click.
+
+    The workspace fragment also executes during the initial full script pass,
+    and a fragment-scoped rerun is only legal *during a fragment rerun*. The
+    result was StreamlitInvalidLayoutContextError the first time a user clicked
+    a delta -- invisible to every test that only rendered the page.
+
+    Guarding at the source because reproducing it live means a network call.
+    """
+    import re
+
+    # Actual calls only -- the prose explaining this rule names the string too.
+    source = Path(APP).read_text()
+    calls = re.findall(r"st\.rerun\([^)]*scope[^)]*\)", source)
+    assert not calls, (
+        f"unscoped st.rerun() only, found {calls}: a fragment-scoped rerun "
+        "raises when the fragment runs as part of a full script pass"
+    )

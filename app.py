@@ -29,7 +29,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from rba.ats.fusion import CHANNEL_WEIGHTS  # noqa: E402
 from rba.config import Config  # noqa: E402
 from rba.groq_client import GroqClient  # noqa: E402
-from rba.nodes.variants import generate_variants  # noqa: E402
+from rba.nodes.variants import generate_variants, improve_bullet  # noqa: E402
 from rba.resume import (  # noqa: E402
     ResumeDoc,
     attribute,
@@ -71,6 +71,8 @@ def state():
     st.session_state.setdefault("baseline_score", None)
     st.session_state.setdefault("attr_signature", None)
     st.session_state.setdefault("variants", None)
+    st.session_state.setdefault("improving", None)
+    st.session_state.setdefault("improved", {})
     return st.session_state
 
 
@@ -392,17 +394,27 @@ def _origin_chip(origin: str) -> str:
     return f":{colour}[{origin}]"
 
 
-def _delta_cell(impact, stale: bool, enabled: bool) -> None:
+def _delta_cell(impact, stale: bool, enabled: bool, bullet_id: str = "") -> None:
+    """The per-line figure, and a way to act on it.
+
+    A number that tells you a line is costing you points but offers no way to
+    fix it is only half a feature, so the figure itself is the control: click
+    it and this line alone gets rewritten and re-measured.
+    """
     if impact is None:
         st.caption("—" if enabled else "off")
         return
     mark = "~" if stale else ""
-    if impact.delta > 0:
-        st.markdown(f"**:green[{mark}{impact.label}]**")
-    elif impact.delta < 0:
-        st.markdown(f"**:red[{mark}{impact.label}]**")
-    else:
-        st.caption(f"{mark}0.0")
+    colour = "green" if impact.delta > 0 else "red" if impact.delta < 0 else "gray"
+    label = f":{colour}[{mark}{impact.label}]"
+    help_text = ("This line is lowering your score. Click to rewrite it and "
+                 "measure whether the rewrite helps."
+                 if impact.delta < 0 else
+                 "Click to look for wording that scores higher.")
+    if st.button(label, key=f"fix_{bullet_id}", help=help_text,
+                 use_container_width=True):
+        state().improving = bullet_id
+        st.rerun()
 
 
 def _suggestion(bullet) -> None:
@@ -427,10 +439,110 @@ def _suggestion(bullet) -> None:
                      use_container_width=False):
             bullet.text = best.text
             st.session_state[f"tx_{bullet.id}"] = best.text
-            st.rerun(scope="fragment")
+            st.rerun()
 
 
-def _bullet_rows(bullets, att, stale: bool) -> None:
+def _run_improve(config: dict, bullet_id: str) -> None:
+    """One model call for one line, then measure every rewrite it returns."""
+    store = state()
+    try:
+        with st.spinner("Rewriting this line, then measuring each attempt…"):
+            async def run():
+                async with GroqClient(
+                        Config.load(),
+                        api_key=config.get("groq_key") or None) as client:
+                    return await improve_bullet(
+                        store.doc, config["jd"], bullet_id, client=client,
+                        required_skills=split(config.get("required", "")),
+                        preferred_skills=split(config.get("preferred", "")))
+
+            result = asyncio.run(run())
+    except Exception as exc:
+        st.error(_diagnose(exc))
+        store.improving = None
+        return
+    store.improved[bullet_id] = result
+
+
+def _improve_panel(config: dict, bullet, impact=None) -> None:
+    """Rewrites for one line, ranked by what they actually score.
+
+    A rewrite that does not beat the original is still shown, with its real
+    number. Hiding the failures would leave the impression that rewriting
+    always helps, and on a 662-word resume it often barely does.
+    """
+    store = state()
+    if store.improving == bullet.id and bullet.id not in store.improved:
+        _run_improve(config, bullet.id)
+
+    result = store.improved.get(bullet.id)
+    if result is None:
+        return
+
+    with st.container(border=True):
+        head = st.columns([5, 1])
+        head[0].markdown("**Rewrites of this line**")
+        if head[1].button("Close", key=f"close_{bullet.id}",
+                          use_container_width=True):
+            store.improving = None
+            store.improved.pop(bullet.id, None)
+            st.rerun()
+
+        kept = [v for v in result.by_bullet.get(bullet.id, []) if v.verified]
+        dropped = [v for v in result.by_bullet.get(bullet.id, []) if not v.verified]
+        better = [v for v in kept if v.gain > 0]
+
+        best = max((v.gain for v in better), default=0.0)
+        if not kept:
+            st.warning("Every rewrite claimed something this project's evidence "
+                       "does not support, so none can be offered.")
+        elif not better:
+            st.info("No rewrite scored higher than the wording you already "
+                    "have. The original is kept.")
+        elif impact is not None and impact.delta < 0 and best < -impact.delta:
+            # Rewording changes how a line is phrased, not what it is about. A
+            # line scores negative here because its subject is distant from the
+            # job, and no verb swap closes that gap -- so say so rather than
+            # let five green numbers imply the problem is solved.
+            st.warning(
+                f"The best rewrite gains **{best:+.2f}**, but this line is "
+                f"costing you **{impact.delta:+.2f}**. Rewording cannot "
+                "recover that: the line scores low because of what it is "
+                "about, not how it is written. Your real options are to "
+                "switch it off, or keep it because it is true and matters to "
+                "you for reasons this job description cannot see."
+            )
+        elif best < 0.05:
+            st.info(f"The best rewrite gains **{best:+.2f}** — close to "
+                    "nothing on a resume this length. Worth taking only if "
+                    "you prefer the wording.")
+
+        for variant in kept:
+            row = st.columns([8, 1.3, 1.5])
+            row[0].markdown(variant.text)
+            colour = "green" if variant.gain > 0 else "red" if variant.gain < 0 else "gray"
+            row[1].markdown(f"**:{colour}[{variant.gain:+.2f}]**")
+            if row[2].button("Use", key=f"take_{bullet.id}_{abs(hash(variant.text)) % 10**8}",
+                             use_container_width=True,
+                             disabled=variant.gain <= 0):
+                bullet.text = variant.text
+                st.session_state[f"tx_{bullet.id}"] = variant.text
+                store.improving = None
+                store.improved.pop(bullet.id, None)
+                st.rerun()
+
+        if dropped:
+            with st.expander(f"{len(dropped)} rejected — not supported by the "
+                             "evidence"):
+                for variant in dropped:
+                    st.caption(f"{variant.rejected_reason}")
+                    st.markdown(f"> {variant.text}")
+        st.caption("Every figure is the score with this line replaced, "
+                   "recomputed in full — not the model's opinion of its own "
+                   "rewrite.")
+
+
+def _bullet_rows(config: dict, bullets, att, stale: bool) -> None:
     for bullet in bullets:
         impact = att.by_id(bullet.id) if att else None
         toggle, body, score = st.columns([0.5, 9, 1.5])
@@ -451,9 +563,11 @@ def _bullet_rows(bullets, att, stale: bool) -> None:
                 caption.append(f"evidence: “{bullet.evidence[:70]}”")
             st.caption(" · ".join(caption))
         with score:
-            _delta_cell(impact, stale, bullet.enabled)
+            _delta_cell(impact, stale, bullet.enabled, bullet.id)
         if bullet.enabled:
             _suggestion(bullet)
+        if state().improving == bullet.id or bullet.id in state().improved:
+            _improve_panel(config, bullet, impact)
 
 
 def suggest_rewrites(config: dict) -> None:
@@ -504,14 +618,20 @@ def editor(config: dict, stale: bool) -> None:
             label = " — ".join(p for p in (entry.title, entry.subtitle) if p)
             st.markdown(f"**{label}**  ·  {entry.dates}" if entry.dates
                         else f"**{label}**")
-            _bullet_rows(entry.bullets, att, stale)
-        _bullet_rows(section.bullets, att, stale)
+            _bullet_rows(config, entry.bullets, att, stale)
+        _bullet_rows(config, section.bullets, att, stale)
 
 
 # -------------------------------------------------------------- workspace --
 @st.fragment
 def workspace(config: dict) -> None:
     """Everything that reacts to a click, in one fragment.
+
+    Note the `st.rerun()` calls inside here are deliberately unscoped. A
+    fragment-scoped rerun is only legal *during* a fragment rerun, and this
+    function also runs as part of the first full script pass -- so scoping them
+    crashed on the very first click. Toggles need no explicit rerun at all: a
+    widget change inside a fragment reruns the fragment by itself.
 
     Streamlit reruns the whole script on any widget change, which meant a
     toggle redrew the sidebar, the uploader and the downloads before the score
@@ -539,7 +659,7 @@ def workspace(config: dict) -> None:
         if bar[1].button("Refresh +/-", use_container_width=True):
             with st.spinner("Re-measuring every line…"):
                 refresh_deltas(config)
-            st.rerun(scope="fragment")
+            st.rerun()
 
     controls = st.columns([1.1, 3])
     if controls[0].button("Suggest better wording", use_container_width=True,
