@@ -44,9 +44,17 @@ _MONTH = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*"
 # Hyphen, en dash and em dash: a PDF may carry any of the three.
 _DASH = "[-\u2013\u2014]"
 # "Oct 2026 - Present", "May 2026 - Jul 2026", "2024 - 2025"
-DATE_RANGE = re.compile(
-    rf"(?P<dates>(?:{_MONTH}\s+)?\d{{4}}\s*{_DASH}\s*(?:Present|(?:{_MONTH}\s+)?\d{{4}}))\s*$"
-)
+# A heading's date. Two shapes in the wild, and only the first was handled:
+# a range ("Jun 2026 - Oct 2026") and a single completion date ("Nov 2025").
+# Missing the second meant those headings failed to match and were appended to
+# the previous project as bullets -- one entry swallowed nine of them.
+_DATE_RANGE = rf"(?:{_MONTH}\s+)?\d{{4}}\s*{_DASH}\s*(?:Present|(?:{_MONTH}\s+)?\d{{4}})"
+_DATE_SINGLE = rf"{_MONTH}\s+\d{{4}}"
+DATE_RANGE = re.compile(rf"(?P<dates>{_DATE_RANGE}|{_DATE_SINGLE})\s*$")
+
+# Title and subtitle are separated by a dash in one layout and a pipe in
+# another: "Sandboxed Code-Execution Agent  |  LLM Agents".
+_TITLE_SPLIT = re.compile(r"\s+[|\u2013\u2014]\s+|\s+-\s+")
 _YEAR_END = re.compile(r"\b(19|20)\d{2}\s*$")
 _SCORE = re.compile(r"(\d+(?:\.\d+)?\s*(?:%|CGPA|GPA))\s*$", re.I)
 _HEADER_FIELD = re.compile(r"^(?P<label>[A-Z][A-Za-z /&]{1,22})\s*:\s*(?P<value>.+)$")
@@ -106,6 +114,19 @@ def _parse_header(lines: list[str]) -> Header:
     return Header(name=name, fields=fields)
 
 
+def _is_heading(line: str) -> bool:
+    """Could this line start an entry?
+
+    Needed because a lone "Nov 2025" is a far weaker signal than a full range:
+    without this, any bullet that happened to end in a month and year would be
+    promoted to a heading and would steal the bullets that followed it. In this
+    format a bullet is a sentence and ends in a full stop; a heading does not,
+    and is short.
+    """
+    stripped = line.strip()
+    return bool(stripped) and not stripped.endswith(".") and len(stripped) <= 120
+
+
 def _join_wrapped(lines: list[str]) -> list[str]:
     """Rejoin bullets split across lines by the PDF's line breaks.
 
@@ -115,9 +136,11 @@ def _join_wrapped(lines: list[str]) -> list[str]:
     """
     out: list[str] = []
     for line in lines:
-        starts_new = bool(DATE_RANGE.search(line)) or line.startswith("Tech:")
+        starts_new = (_is_heading(line) and bool(DATE_RANGE.search(line))) \
+            or line.startswith("Tech:")
         if out and not starts_new and not out[-1].endswith((".", ":")) \
-                and not DATE_RANGE.search(out[-1]) and not out[-1].startswith("Tech:"):
+                and not (_is_heading(out[-1]) and DATE_RANGE.search(out[-1])) \
+                and not out[-1].startswith("Tech:"):
             out[-1] = f"{out[-1]} {line}"
         else:
             out.append(line)
@@ -128,12 +151,12 @@ def _parse_entries(lines: list[str], origin: str = "yours") -> list[Entry]:
     """Dated entries with an optional `Tech:` line and unmarked bullets."""
     entries: list[Entry] = []
     for line in _join_wrapped(lines):
-        match = DATE_RANGE.search(line)
+        match = DATE_RANGE.search(line) if _is_heading(line) else None
         if match:
-            heading = line[: match.start()].strip(" .,-\u2013\u2014")
-            title, _, subtitle = heading.partition(" - ")
-            entries.append(Entry(title=title.strip(),
-                                 subtitle=subtitle.strip(),
+            heading = line[: match.start()].strip(" .,-|\u2013\u2014")
+            parts = _TITLE_SPLIT.split(heading, maxsplit=1)
+            entries.append(Entry(title=parts[0].strip(),
+                                 subtitle=(parts[1].strip() if len(parts) > 1 else ""),
                                  dates=match.group("dates").strip()))
             continue
         if not entries:

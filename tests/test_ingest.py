@@ -180,3 +180,73 @@ def test_unknown_layout_falls_back_without_inventing_structure():
     result = parse_resume(plain)
     assert result.all_bullets()
     assert "Built a thing" in result.as_text()
+
+
+# -- a second real layout: pipe separators and single completion dates ------
+# Both files are text extracted from genuine PDFs. The Clean one broke the
+# parser: its headings end in a lone "Nov 2025" rather than a range, and split
+# title from subtitle with "|". Neither matched, so two whole projects were
+# appended to the previous entry as bullets -- it held nine instead of two.
+AGENTS_BITS = pathlib.Path(__file__).parent.parent / "fixtures" / "aniket_agents_bits.txt"
+AGENTS_CLEAN = pathlib.Path(__file__).parent.parent / "fixtures" / "aniket_agents_clean.txt"
+
+
+@pytest.fixture(scope="module")
+def clean_doc():
+    return parse_bits(AGENTS_CLEAN.read_text())
+
+
+@pytest.fixture(scope="module")
+def bits_doc():
+    return parse_bits(AGENTS_BITS.read_text())
+
+
+def test_single_date_headings_are_entries_not_bullets(clean_doc):
+    projects = section(clean_doc, "PROJECTS").entries
+    assert [p.title for p in projects] == [
+        "Sandboxed Code-Execution Agent",
+        "CodeAct Fine-tuning with Execution Feedback",
+        "Live Debugging Partner",
+        "VisionDev",
+    ]
+    # The exact regression: one entry had swallowed the other two projects.
+    assert [len(p.bullets) for p in projects] == [2, 2, 3, 2]
+
+
+def test_a_lone_month_and_year_is_kept_as_the_date(clean_doc):
+    dates = {p.title: p.dates for p in section(clean_doc, "PROJECTS").entries}
+    assert dates["CodeAct Fine-tuning with Execution Feedback"] == "Nov 2025"
+    assert dates["Live Debugging Partner"] == "Oct 2026"
+    assert dates["VisionDev"] == "Jan 2026 - May 2026"
+
+
+def test_pipe_separates_title_from_subtitle(clean_doc):
+    subtitles = {p.title: p.subtitle for p in section(clean_doc, "PROJECTS").entries}
+    assert subtitles["Sandboxed Code-Execution Agent"] == "LLM Agents"
+    assert subtitles["CodeAct Fine-tuning with Execution Feedback"] == "LLM Fine-tuning"
+    assert subtitles["VisionDev"] == "Computer Vision"
+
+
+def test_the_dash_layout_still_parses(bits_doc):
+    """The looser date rule must not cost us the layout that already worked."""
+    projects = section(bits_doc, "PROJECTS").entries
+    assert len(projects) == 4
+    assert [len(p.bullets) for p in projects] == [3, 2, 2, 2]
+    assert projects[0].subtitle == "Interaction Simulation"
+
+
+@pytest.mark.parametrize("line", [
+    "Shipped the migration in Mar 2024.",
+    "Reduced p99 latency during the incident of Oct 2025.",
+])
+def test_a_bullet_ending_in_a_date_does_not_become_a_heading(line):
+    """The risk the looser rule introduces, closed deliberately.
+
+    A sentence ends in a full stop; a heading does not. Without this, any
+    bullet mentioning a month would be promoted and would steal the bullets
+    after it -- the same failure, with a new cause.
+    """
+    from rba.resume.ingest import _is_heading
+
+    assert not _is_heading(line)
+    assert _is_heading("CodeAct Fine-tuning with Execution Feedback | X Nov 2025")
