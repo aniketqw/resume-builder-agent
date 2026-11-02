@@ -2812,9 +2812,238 @@ In the interest of the rule this project runs on, the gaps:
 
 ---
 
-*Compiled from 45 commits — the first 38 reconstructed from their diffs and
-the module docstrings, the last seven recorded as the work happened — together
-with `README.md`,
+# Session 3 — grounding against the repositories
+
+Five commits, written as the work happened rather than reconstructed
+afterwards. They form one pipeline, in order: parse a résumé layout correctly,
+decide which repository each project actually is (and admit when that cannot
+be decided automatically), check the author's existing claims against that
+repository by deletion only, then propose what the evidence supports that is
+not yet said — without repeating it. Every number below is quoted from a
+commit message body, a module docstring, or one of the two calibration
+scripts (`scripts/calibrate_matching.py`, `scripts/calibrate_novelty.py`) that
+produced it; both are designed to be re-run against different data rather than
+trusted as a one-off claim.
+
+---
+
+## 300e2d9 — fix: two whole projects were being parsed as bullets   2026-10-29
+
+**Problem** One résumé layout ends a project heading with a single completion
+date ("Nov 2025") rather than a range, and separates title from subtitle with
+a pipe rather than a dash. `DATE_RANGE` demanded a range, so a heading like
+`CodeAct Fine-tuning with Execution Feedback | LLM Fine-tuning Nov 2025` never
+matched and fell through to `entries[-1].bullets.append(...)` — the heading
+became a bullet of the project above it, and everything under it followed.
+
+**Measured** On two real PDFs from the same person:
+
+| fixture | before | after |
+|---|---|---|
+| `AI_Agents_BITS.pdf` | 4 projects, correct | 4 projects, correct — unchanged |
+| `AI_Agents_Clean.pdf` | 2 projects, one entry held 9 bullets | 4 projects, 2 / 2 / 3 / 2 bullets, subtitles split |
+
+**Decision** Accept a lone month-and-year as a heading's date, but only when
+the line does not end in a full stop and is short (`_is_heading`) — in this
+layout a heading is a fragment and a bullet is a sentence. Without that guard,
+any bullet that happens to mention a month would be promoted to a heading and
+would steal every bullet that follows it: the same bug, with a new cause.
+Title and subtitle now also split on "|", not only " - ".
+
+Both PDFs are kept as fixtures (`fixtures/aniket_agents_bits.txt`,
+`fixtures/aniket_agents_clean.txt`) so the fix is asserted against real line
+wrapping rather than a tidied sample, alongside a parametrised test that a
+bullet ending in a date ("Shipped the migration in Mar 2024.") is never
+promoted to a heading.
+
+**Files** `src/rba/resume/ingest.py`, `fixtures/aniket_agents_bits.txt`,
+`fixtures/aniket_agents_clean.txt`, `tests/test_ingest.py`
+
+> Rationale recorded in the commit message body.
+
+---
+
+## de48db9 — feat: match projects to repositories semantically, and ask when unsure   2026-10-29
+
+**Problem** Attaching a résumé project to the wrong repository is the worst
+mistake available downstream: every later check — grounding, additions — would
+go on to verify real claims against unrelated evidence, stripping true
+statements and keeping false ones. The matcher has to refuse rather than
+guess.
+
+**Why name matching fails, and why looser is worse** On a real account of 58
+public repositories against six résumé projects, matching by name found **one
+in six**. Relaxing the match to substrings does not recover the rest; it
+invents new failures: a repository literally named `code` substring-matches
+both "Sandboxed **Code**-Execution Agent" and "**Code**Act Fine-tuning", two
+different projects. A loose matcher is more dangerous than a strict one here,
+because it manufactures confidence instead of withholding it.
+
+**Decision** Match semantically, on the same ONNX embedding model the scorer
+already loads — no LLM call, no tokens spent. This finds all four true
+matches, including `sandbox-agent`, `CodeActImplementation` and
+`vision_dev_project`, none of which share a name with their project. An exact
+normalised name match is kept as a *bonus* added to the embedding score — a
+real name match is strong evidence — but a bare substring is given no credit
+at all, precisely because of the `code` false positive above.
+
+**Why neither confidence nor margin alone works** Measured by
+`scripts/calibrate_matching.py`, which is written to be re-run against any
+GitHub account rather than trusted on this one:
+
+| | confidence | margin |
+|---|---|---|
+| true matches | 0.697 – 0.957 | 0.021 – 0.304 |
+| projects with no repository | 0.686 – 0.696 | 0.004 – 0.026 |
+
+Confidence alone separates the two groups by **0.001** — not a decision
+procedure — and the margin over the runner-up overlaps outright. Requiring
+*both* to be strong (`STRONG_CONFIDENCE = 0.75`, `STRONG_MARGIN = 0.10`)
+auto-accepts 3 of the 4 true matches with **zero false accepts**, and sends
+the remaining true match to the user for confirmation. That asymmetry is the
+right trade: asking costs the user a click; a wrong match costs the résumé,
+because a confirmed-wrong repository would go on to verify genuine claims
+against evidence that has nothing to do with them.
+
+**Caught in calibration** Non-project sections had to be excluded outright,
+not merely scored low. Including them was actively harmful: the Marvell
+internship matched `live-debugging-partner` at 0.658, and the teaching
+assistantship matched `vision_dev_project` at 0.659 — both higher than genuine
+projects that have no repository at all.
+
+**Files** `src/rba/resume/matching.py`, `scripts/calibrate_matching.py`,
+`tests/test_matching.py`
+
+> Rationale recorded in the commit message body and the
+> `src/rba/resume/matching.py` module docstring.
+
+---
+
+## 980bf1f — feat: check a resume against its own repositories, by deleting only   2026-10-29
+
+**Problem** A résumé can go on carrying claims its own repositories do not
+support — a figure that drifted upward between drafts, a technology that was
+considered and never used. Something has to check the author's existing text
+against the evidence, not only what a model proposes to add to it.
+
+**Decision** The constraint here is narrower than anywhere else in the
+codebase: **this code may delete, never write.** Every sentence it emits is
+either the author's sentence unchanged, or the author's sentence with a span
+removed — never a rewrite, however "minimal" it would look. A model-written
+rewrite, however small, is still the tool putting words in someone's mouth,
+and those words go to an employer under that person's name. Cutting is the
+only edit that cannot say something new.
+
+**Why this is checkable, not just intended** `is_subsequence_edit` turns that
+constraint into a mechanical property instead of a claim about intention: the
+edited text's content words must appear, in order, as a subsequence of the
+original's. Punctuation tidying is allowed; adding a single new word is not.
+If a proposed cut somehow fails the check, the original is kept and the line
+is flagged instead of trimmed — a flagged true sentence beats a quietly
+altered one.
+
+**The honest fallback** Where a clean cut exists — a parenthetical, or a
+trailing clause introduced by a semicolon or dash — it takes the shortest one:
+
+```
+before  ...clusters failures; blur caused 40% of failures.
+after   ...clusters failures.                     (40% absent from the repo)
+```
+
+Where none exists, nothing is changed and the line is flagged verbatim
+instead. "blur caused 40% of failures." has no parenthetical and no trailing
+clause; removing the figure alone would leave "blur caused of failures".
+Reporting the problem honestly beats emitting a broken sentence, so that line
+is flagged rather than mangled. A project with no matching repository is
+`unverifiable`, not wrong, and keeps every word — deleting real work because
+no repository was found would be the worse error.
+
+**The tokeniser bug caught by its own test** The content-word tokeniser
+(`_CONTENT`) deliberately allows `.` inside a word so that `node.js` survives
+intact. That same rule also swallowed the full stop ending a sentence, so
+`failures.` compared unequal to `failures`: the subsequence check rejected a
+perfectly good trim as if it had invented a word, and silently downgraded it
+from `trimmed` to `flagged`. Fixed by stripping trailing punctuation from each
+token before comparing — caught by the module's own invariant test, not by a
+separate bug report.
+
+**Files** `src/rba/resume/grounding.py`, `tests/test_grounding.py`
+
+> Rationale recorded in the commit message body and the
+> `src/rba/resume/grounding.py` module docstring.
+
+---
+
+## e58faef — feat: propose extra points without repeating what the resume says   2026-10-29
+
+**Problem** After the author's own text, and after grounding it against the
+repositories, what else does the evidence support that is not on the page?
+Proposed naively, this risks two failures at once: inventing a claim the
+repository does not show, and padding the résumé with a second line that says
+what an existing line already says.
+
+**Decision** Candidates are generated with one structured call per project,
+then checked by the same unsupported-claims code the grounding pass uses — an
+addition is held to exactly the standard an existing line is held to.
+Restating a point already there is refused as firmly as inventing one.
+
+**Duplicate-detection calibration** Algorithmic, not a model's opinion, and
+reproducible via `scripts/calibrate_novelty.py`: real bullets paired with
+hand-written rewordings of themselves, scored against every pair of
+genuinely different real bullets —
+
+| | cosine | word overlap |
+|---|---|---|
+| same claim, reworded | 0.846 – 0.972 | 0.636 – 0.750 |
+| genuinely different | 0.359 – 0.739 | 0.000 – 0.222 |
+| gap | +0.106 | +0.414 |
+
+Thresholds (`DUPLICATE_COSINE = 0.79`, `DUPLICATE_OVERLAP = 0.43`) sit at the
+midpoints of those gaps rather than anywhere convenient. Measured result:
+**0 missed duplicates, 0 false duplicates.** Either signal firing alone is
+enough to flag a duplicate, because the two failure costs are asymmetric: a
+missed duplicate puts a repeated line in front of an employer, while a
+suppressed suggestion is still reachable through the rewrite control.
+
+**Why a duplicate becomes a rewrite, not a deletion** A detected duplicate is
+not discarded; it is turned into a proposed rewrite of the existing line it
+restates. If a better wording exists for something already claimed, the right
+move is to improve that line rather than add a second one saying the same
+thing — a résumé with two lines making one point is worse than one line, and
+the score the second line would earn is illusory.
+
+**The honest gain** Every reported gain is a real re-score — the candidate is
+inserted into the document, the document is re-scored, and the candidate is
+removed again — so gains are allowed to be negative. `usable` gates on a
+point actually helping rather than merely being added, so a measured
+non-improvement is reported rather than silently offered as if it were one.
+
+**Files** `src/rba/nodes/additions.py`, `src/rba/prompts/addition.v1.md`,
+`scripts/calibrate_novelty.py`, `tests/test_additions.py`
+
+> Rationale recorded in the commit message body and the
+> `src/rba/nodes/additions.py` module docstring.
+
+---
+
+## fc38702 — style: zip(strict=True) in the novelty calibration script   2026-10-29
+
+A one-line follow-up to `e58faef`. `zip(dup, pairs)` in
+`scripts/calibrate_novelty.py` now passes `strict=True`, so the calibration
+script raises if the measured duplicate list and the ground-truth reword pairs
+it is zipped against ever drift out of length, instead of silently truncating
+to the shorter one and reporting a result against the wrong pairing.
+
+**Files** `scripts/calibrate_novelty.py`
+
+> Rationale recorded in the commit subject.
+
+---
+
+*Compiled from 52 commits — the first 38 reconstructed from their diffs and
+the module docstrings, the following seven recorded as session 2 happened, and
+the final five recorded as session 3 happened — together with `README.md`,
 `run.md`, `evals/budget.md` and `evals/budget.json` in this repository. Every
-number above is quoted from one of those sources. Where no source recorded a
-number, this document says so.*
+number above is quoted from one of those sources or from a commit message
+body. Where no source recorded a number, this document says so. The suite now
+reports **476 passing tests**.*
