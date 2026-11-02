@@ -41,7 +41,85 @@ _CONTENT = re.compile(r"[a-z0-9][a-z0-9.+#/_-]*")
 VERIFIED = "verified"          # every claim supported by the evidence
 TRIMMED = "trimmed"            # an unsupported span was cut out
 FLAGGED = "flagged"            # unsupported, but no safe cut exists
-UNVERIFIABLE = "unverifiable"  # no repository to check against
+UNVERIFIABLE = "unverifiable"  # nothing solid enough to check against
+
+
+# What a repository's evidence is actually good enough to decide.
+#
+# This gate exists because the first version got it badly wrong on real data.
+# `vision_dev_project` has 4,884 files, no README and no parsed dependency
+# manifest, so its evidence bundle contains no mention of PyTorch -- and the
+# checker duly reported that a true claim about PyTorch was unsupported. That
+# is absence of evidence treated as evidence of absence, and acting on it means
+# deleting things that are true.
+#
+# So the two claim types are gated on the evidence that could possibly carry
+# them. A figure like "34 unit tests" is stated in prose, so judging it needs a
+# README or real commit messages. A technology is named in a dependency
+# manifest or in prose, so judging it needs one of those.
+MIN_README_CHARS = 300
+MIN_COMMIT_CHARS = 400
+MIN_RAW_CHARS = 60
+
+
+@dataclass(frozen=True)
+class Strength:
+    """Which checks this evidence can support."""
+
+    numbers: bool
+    technologies: bool
+    why: str = ""
+
+    @property
+    def any(self) -> bool:
+        return self.numbers or self.technologies
+
+
+def evidence_strength(evidence: str) -> Strength:
+    """Decide what this bundle is entitled to rule on."""
+    import json as _json
+
+    if not evidence.strip():
+        return Strength(False, False, "no repository matched")
+    try:
+        bundle = _json.loads(evidence)
+    except ValueError:
+        # A raw string rather than the structured bundle. There is no way to
+        # tell a README from a commit log here, so it is taken at face value as
+        # curated evidence -- a caller who hand-assembles a string has already
+        # decided what belongs in it. The size floor only rejects the trivially
+        # empty; the strict README rule below applies to real bundles, which is
+        # what the fetcher always produces.
+        enough = len(evidence.strip()) >= MIN_RAW_CHARS
+        return Strength(enough, enough, "" if enough
+                        else "the evidence is too thin to judge")
+
+    readme = (bundle.get("readme") or {}).get("text", "") or ""
+    commits = " ".join(c.get("message", "")
+                       for c in (bundle.get("commits") or []))
+    deps = bundle.get("dependencies") or []
+
+    # Each claim type is gated on the source that would actually carry it.
+    #
+    # A measured result ("blur caused 40% of failures") is written down in
+    # documentation, not in commit subjects, so judging a figure needs a README.
+    # A technology is named in a dependency manifest or a README; commit
+    # messages mention neither reliably. Letting commits alone license both
+    # checks is what left `vision_dev_project` -- 4,884 files, no README, no
+    # manifest -- confidently reporting that its true PyTorch claim was
+    # unsupported.
+    documented = len(readme) >= MIN_README_CHARS
+    manifest = bool(deps)
+    why = ""
+    if not documented and not manifest:
+        why = (f"this repository has no README and no dependency manifest"
+               f"{f' (only {len(commits)} characters of commit messages)' if commits else ''}"
+               ", so nothing in it can confirm or deny a claim")
+    elif not documented:
+        why = ("this repository has no README, so its figures cannot be "
+               "checked — only the technologies its manifest names")
+    return Strength(numbers=documented, technologies=documented or manifest,
+                    why=why)
 
 
 @dataclass
@@ -55,6 +133,7 @@ class PointCheck:
     unsupported_numbers: list[str] = field(default_factory=list)
     unsupported_tech: list[str] = field(default_factory=list)
     repo: str = ""
+    note: str = ""
 
     @property
     def changed(self) -> bool:
@@ -67,19 +146,22 @@ class PointCheck:
     def reason(self) -> str:
         bits = []
         if self.unsupported_numbers:
-            bits.append("figure(s) not in the repository: "
+            bits.append("figure(s) stated nowhere in the repository: "
                         + ", ".join(self.unsupported_numbers))
         if self.unsupported_tech:
-            bits.append("technology not evidenced: "
+            bits.append("technology not named anywhere in the repository: "
                         + ", ".join(self.unsupported_tech))
         if self.status == UNVERIFIABLE:
-            return "no repository matched, so nothing could be checked"
+            return self.note or "no repository matched, so nothing was checked"
         if not bits:
             return "every claim appears in the repository"
         joined = "; ".join(bits)
         if self.status == TRIMMED:
-            return f"{joined} — that span was removed, the rest is verbatim"
-        return f"{joined} — left as written; no part of it could be cut cleanly"
+            return (f"{joined} — that span was removed, the rest is verbatim. "
+                    "Restore it if you can point to where it is recorded.")
+        return (f"{joined}. It may still be true — the repository simply does "
+                "not say so. Left exactly as written; no part of it could be "
+                "cut cleanly.")
 
     def to_dict(self) -> dict:
         return {"bullet_id": self.bullet_id, "original": self.original,
@@ -125,11 +207,22 @@ def tech_terms(text: str) -> list[str]:
 
 
 def unsupported_claims(text: str, evidence: str) -> tuple[list[str], list[str]]:
-    """Figures and technologies in `text` that `evidence` does not support."""
-    if not evidence.strip():
-        return [], []
-    bad_numbers = [n for n in numbers_in(text) if not _number_supported(n, evidence)]
-    _keep, drop = filter_tech(tech_terms(text), evidence)
+    """Figures and technologies in `text` that `evidence` contradicts or omits.
+
+    Only claims the evidence is *competent to judge* are returned; see
+    :func:`evidence_strength`. A repository with nothing in it proves nothing
+    about the résumé, and saying otherwise would be the same overreach this
+    project exists to prevent -- just pointed at the author instead of the
+    model.
+    """
+    strength = evidence_strength(evidence)
+    bad_numbers: list[str] = []
+    drop: list[str] = []
+    if strength.numbers:
+        bad_numbers = [n for n in numbers_in(text)
+                       if not _number_supported(n, evidence)]
+    if strength.technologies:
+        _keep, drop = filter_tech(tech_terms(text), evidence)
     return bad_numbers, drop
 
 
@@ -218,9 +311,10 @@ def is_subsequence_edit(original: str, edited: str) -> bool:
 
 def check_point(bullet: Bullet, evidence: str, repo: str = "") -> PointCheck:
     """Verify one point and, if needed, cut what the evidence cannot support."""
-    if not evidence.strip():
+    strength = evidence_strength(evidence)
+    if not strength.any:
         return PointCheck(bullet.id, bullet.text, bullet.text, UNVERIFIABLE,
-                          repo=repo)
+                          repo=repo, note=strength.why)
 
     bad_numbers, bad_tech = unsupported_claims(bullet.text, evidence)
     if not bad_numbers and not bad_tech:

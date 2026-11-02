@@ -29,6 +29,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from rba.ats.fusion import CHANNEL_WEIGHTS  # noqa: E402
 from rba.config import Config  # noqa: E402
 from rba.groq_client import GroqClient  # noqa: E402
+from rba.nodes.additions import generate_additions  # noqa: E402
 from rba.nodes.variants import generate_variants, improve_bullet  # noqa: E402
 from rba.resume import (  # noqa: E402
     ResumeDoc,
@@ -37,7 +38,9 @@ from rba.resume import (  # noqa: E402
     rescore,
 )
 from rba.resume.diagnostics import diagnose  # noqa: E402
+from rba.resume.grounding import FLAGGED, TRIMMED, ground_document  # noqa: E402
 from rba.resume.ingest import parse_resume  # noqa: E402
+from rba.resume.matching import match_projects  # noqa: E402
 from rba.resume.merge import baseline, candidates, merge_candidates  # noqa: E402
 from rba.resume.render import (  # noqa: E402
     RenderOptions,
@@ -48,6 +51,7 @@ from rba.resume.render import (  # noqa: E402
 )
 from rba.resume.render.options import ORIGIN_LABELS  # noqa: E402
 from rba.resume.render.pdf import pages_used  # noqa: E402
+from rba.resume.versions import apply_additions, build_versions  # noqa: E402
 from rba.scoring import load_roles  # noqa: E402
 
 st.set_page_config(page_title="Resume Builder — evidence-grounded",
@@ -73,6 +77,11 @@ def state():
     st.session_state.setdefault("variants", None)
     st.session_state.setdefault("improving", None)
     st.session_state.setdefault("improved", {})
+    st.session_state.setdefault("versions", None)
+    st.session_state.setdefault("additions", None)
+    st.session_state.setdefault("matches", None)
+    st.session_state.setdefault("repos", [])
+    st.session_state.setdefault("evidence", {})
     return st.session_state
 
 
@@ -622,6 +631,181 @@ def editor(config: dict, stale: bool) -> None:
         _bullet_rows(config, section.bullets, att, stale)
 
 
+# --------------------------------------------------------- three versions --
+async def _gather_evidence(config: dict, doc: ResumeDoc):
+    """Match each project to a repository, then read that repository.
+
+    Returns (matches, evidence_by_key, repos). Matching is shown to the user
+    before anything is verified against it, because attaching a project to the
+    wrong repository would check real claims against unrelated evidence.
+    """
+    from rba.config import Config as _Config
+    from rba.github_tools import make_backend
+    from rba.nodes.fetch import fetch_facts
+    from rba.nodes.summarize import build_evidence
+
+    cfg = _Config.load()
+    backend = await make_backend(cfg, token=config.get("github_token") or None)
+    try:
+        repos = [r for r in await backend.list_repos(config.get("username", ""))
+                 if not r.is_private]
+        matches = match_projects(doc, repos)
+        wanted = {m.repo for m in matches if m.strong}
+        chosen = [r for r in repos if r.name in wanted]
+        if not chosen:
+            return matches, {}, repos
+        state_in = {"selected": chosen}
+        facts = (await fetch_facts(state_in, backend=backend, config=cfg)).get("facts", {})
+    finally:
+        await backend.aclose()
+
+    by_key: dict[str, str] = {}
+    for match in matches:
+        if match.strong and match.repo in facts:
+            by_key[match.project_key] = build_evidence(facts[match.repo])
+    return matches, by_key, repos
+
+
+def build_three_versions(config: dict) -> None:
+    """Ground the resume against its repositories, then propose additions."""
+    store = state()
+    required, preferred = split(config.get("required", "")), \
+        split(config.get("preferred", ""))
+    try:
+        with st.spinner("Matching projects to repositories…"):
+            matches, evidence, repos = asyncio.run(
+                _gather_evidence(config, store.doc))
+        store.matches, store.evidence, store.repos = matches, evidence, repos
+
+        with st.spinner("Checking every point against its repository…"):
+            repo_by_key = {m.project_key: m.repo for m in matches if m.strong}
+            report = ground_document(store.doc, evidence, repo_by_key)
+
+        improved_doc = None
+        if evidence:
+            with st.spinner("Looking for what the evidence shows but the "
+                            "resume does not say…"):
+                async def run():
+                    async with GroqClient(
+                            Config.load(),
+                            api_key=config.get("groq_key") or None) as client:
+                        return await generate_additions(
+                            report.document, config["jd"], client=client,
+                            evidence_by_key=evidence,
+                            required_skills=required, preferred_skills=preferred)
+
+                additions = asyncio.run(run())
+                store.additions = additions
+                improved_doc = apply_additions(report.document, additions)
+
+        store.versions = build_versions(
+            store.doc, config["jd"], report=report, improved=improved_doc,
+            required_skills=required, preferred_skills=preferred)
+    except Exception as exc:
+        st.error(_diagnose(exc))
+
+
+def _match_table(matches) -> None:
+    st.caption("Each project and the repository it will be checked against. "
+               "Confirm these before trusting anything below — verifying a "
+               "project against the wrong repository would strip true claims "
+               "and keep false ones.")
+    for match in matches:
+        row = st.columns([3, 2, 3])
+        row[0].markdown(f"**{match.project_title}**")
+        row[1].markdown(f"`{match.repo}`" if match.repo else ":orange[no match]")
+        row[2].caption(match.why())
+
+
+def versions_tab(config: dict) -> None:
+    store = state()
+    if store.versions is None:
+        st.markdown("#### Check this resume against your repositories")
+        st.caption(
+            "Three versions: what you uploaded, what your repositories "
+            "actually support, and what they show that the resume does not "
+            "say yet. Needs a GitHub username in the sidebar; a Groq key only "
+            "for the third.")
+        if st.button("Check against GitHub", type="primary"):
+            build_three_versions(config)
+            st.rerun()
+        return
+
+    if store.matches:
+        with st.expander("Project → repository", expanded=False):
+            _match_table(store.matches)
+
+    versions = store.versions
+    columns = st.columns(len(versions.versions))
+    previous = None
+    for column, version in zip(columns, versions.versions, strict=False):
+        with column:
+            st.metric(version.name.title(), f"{version.score:.1f}",
+                      delta=(None if previous is None
+                             else f"{version.delta_from(previous):+.1f}"))
+            st.caption(version.note)
+        previous = version
+
+    cost, gain = versions.honesty_cost(), versions.improvement_gain()
+    if cost < 0:
+        st.warning(f"Grounding cost **{cost:+.1f}** points. That gap is what "
+                   "the resume was claiming without repository support — the "
+                   "lower number is the honest one.")
+    elif cost > 0:
+        st.success(f"Grounding **raised** the score by {cost:+.1f}: removing "
+                   "unsupported spans tightened the wording.")
+    if gain:
+        st.info(f"Additions the evidence supports are worth **{gain:+.1f}**.")
+
+    report = versions.report
+    if report is not None:
+        trimmed, flagged = report.by_status(TRIMMED), report.by_status(FLAGGED)
+        if trimmed:
+            with st.expander(f"{len(trimmed)} point(s) trimmed"):
+                for check in trimmed:
+                    st.caption(check.reason())
+                    st.markdown(f":red[~~{check.original}~~]")
+                    st.markdown(f":green[{check.text}]")
+        if flagged:
+            with st.expander(f"{len(flagged)} point(s) flagged, left as written"):
+                st.caption("No part of these could be cut without breaking the "
+                           "sentence, so nothing was changed. Decide yourself.")
+                for check in flagged:
+                    st.markdown(f"- {check.original}")
+                    st.caption(check.reason())
+
+    additions = getattr(store, "additions", None)
+    if additions is not None:
+        usable = [a for a in additions.added() if a.usable]
+        duplicates = additions.duplicates()
+        if usable:
+            with st.expander(f"{len(usable)} point(s) the evidence supports"):
+                for item in usable:
+                    st.markdown(f"- {item.text}  :green[{item.gain:+.2f}]")
+        if duplicates:
+            with st.expander(f"{len(duplicates)} suggestion(s) suppressed as "
+                             "repeats"):
+                st.caption("These restate a point already on the resume. "
+                           "Rather than add a second line saying the same "
+                           "thing, improve the existing one with the +/- "
+                           "control below.")
+                for item in duplicates:
+                    st.markdown(f"- {item.text}")
+                    st.caption(f"similarity {item.similarity:.2f}")
+
+    chosen = st.radio("Edit which version?",
+                      [v.name for v in versions.versions],
+                      horizontal=True, key="active_version")
+    if st.button("Load this version into the editor"):
+        picked = versions.get(chosen)
+        if picked is not None:
+            store.doc = ResumeDoc.from_dict(picked.document.to_dict())
+            store.attribution = None
+            store.attr_signature = None
+            recompute(config)
+            st.rerun()
+
+
 # -------------------------------------------------------------- workspace --
 @st.fragment
 def workspace(config: dict) -> None:
@@ -704,7 +888,11 @@ def main() -> None:
             "- Tick or untick any line and the score moves immediately.")
         return
 
-    workspace(config)
+    editor_tab, versions_view = st.tabs(["Editor", "Three versions"])
+    with editor_tab:
+        workspace(config)
+    with versions_view:
+        versions_tab(config)
 
     with st.expander("How the number is produced"):
         st.markdown(

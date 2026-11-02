@@ -142,3 +142,83 @@ def test_a_project_without_a_repo_keeps_all_its_points():
     report = ground_document(doc, {})
     assert [c.status for c in report.checks] == [UNVERIFIABLE]
     assert "Next.js and Express" in report.document.as_text()
+
+
+# -- absence of evidence is not evidence of absence ------------------------
+# The first version of this module got it badly wrong on real repositories.
+# `vision_dev_project` has 4,884 files, no README and no parsed dependency
+# manifest, so nothing in its evidence mentions PyTorch -- and the checker
+# reported that a true PyTorch claim was unsupported. Acting on that means
+# deleting things that are true, which is worse than not checking at all.
+def bundle(readme: str = "", deps: list[str] | None = None,
+           commits: list[str] | None = None) -> str:
+    import json
+
+    payload: dict = {"repo": "example"}
+    if readme:
+        payload["readme"] = {"path": "README.md", "text": readme}
+    if deps:
+        payload["dependencies"] = deps
+    if commits:
+        payload["commits"] = [{"sha": "a", "message": m} for m in commits]
+    return json.dumps(payload)
+
+
+def test_a_repo_with_nothing_in_it_judges_nothing():
+    from rba.resume.grounding import evidence_strength
+
+    strength = evidence_strength(bundle(commits=["fix", "wip", "update"]))
+    assert not strength.numbers
+    assert not strength.technologies
+    assert "no README and no dependency manifest" in strength.why
+
+
+def test_a_true_claim_is_not_flagged_by_an_empty_repository():
+    """The exact false positive, as a regression test."""
+    evidence = bundle(commits=["refactor pipeline", "tidy logging"])
+    result = check_point(
+        Bullet(text="Built a PyTorch Lightning callback pipeline that logs "
+                    "CIFAR-10 misclassifications; blur caused 40% of failures."),
+        evidence, repo="vision_dev_project")
+    assert result.status == UNVERIFIABLE
+    assert result.text == result.original
+    assert "cannot confirm or deny" in result.reason() or \
+        "confirm or deny" in result.reason()
+
+
+def test_a_manifest_licenses_technology_checks_but_not_figures():
+    """A dependency list names technologies; it says nothing about results."""
+    from rba.resume.grounding import evidence_strength
+
+    strength = evidence_strength(bundle(deps=["langgraph", "docker"]))
+    assert strength.technologies
+    assert not strength.numbers, "a manifest cannot confirm a measured figure"
+
+    checked = check_point(
+        Bullet(text="Built a LangGraph agent in Docker across 14 test cases."),
+        bundle(deps=["langgraph", "docker"]))
+    # 14 is unjudgeable here, and langgraph/docker are both present.
+    assert checked.status == VERIFIED
+    assert not checked.unsupported_numbers
+
+
+def test_a_readme_licenses_both_checks():
+    from rba.resume.grounding import evidence_strength
+
+    readme = ("This project builds a LangGraph agent. " * 12)
+    strength = evidence_strength(bundle(readme=readme))
+    assert strength.numbers and strength.technologies
+    assert strength.why == ""
+
+
+def test_an_unsupported_figure_is_still_caught_when_there_is_a_readme():
+    """The gate must not become a blanket excuse."""
+    readme = ("The simulator compares four interaction channels for a "
+              "debugging agent across scripted sessions. " * 6)
+    result = check_point(
+        Bullet(text="Built a simulator comparing four channels; it ran "
+                    "99,999 sessions."),
+        bundle(readme=readme))
+    assert result.status in (TRIMMED, FLAGGED)
+    assert "99,999" in " ".join(result.unsupported_numbers) or \
+        "99999" in " ".join(result.unsupported_numbers)
