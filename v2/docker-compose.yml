@@ -1,0 +1,77 @@
+# `docker compose up --build` and open http://localhost:8000
+#
+# One service by default. The github-mcp service sits behind a profile because
+# it is only needed for the self-hosted GitHub path -- see the note at the
+# bottom, which is worth reading before switching RBA_MCP_MODE.
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: resume-builder-agent-v2:local
+    # Optional so a fresh clone can `docker compose config` before writing one.
+    # The app still starts without it; credentials can be supplied per request.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      RBA_MCP_MODE: ${RBA_MCP_MODE:-remote}
+      RBA_ONNX_THREADS: "4"
+      RBA_EMBED_BATCH: "16"
+      OMP_NUM_THREADS: "4"
+      RBA_CONFIG: /app/config.yaml
+      RBA_ROOT: /app
+      RBA_SESSION_TTL: "7200"
+      RBA_REQUIRE_DENSE: "1"
+      RBA_MODEL_LOCAL_ONLY: "1"
+    ports:
+      - "${RBA_PORT:-8000}:8000"
+    volumes:
+      # Edit models and limits without rebuilding.
+      - ./config.yaml:/app/config.yaml:ro
+      # The LLM response cache. Keyed by repo + HEAD SHA + prompt version, so
+      # persisting it is the difference between a re-run costing zero tokens
+      # and costing a full import.
+      - rba-cache:/app/.cache
+      - rba-out:/app/out
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,sys,urllib.request; d=json.load(urllib.request.urlopen('http://127.0.0.1:8000/api/health',timeout=4)); sys.exit(0 if d.get('ok') and d.get('dense') else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          # dense.BATCH keeps peak RSS flat within one embed call; this is the
+          # headroom that makes RBA_EMBED_BATCH=16 safe.
+          memory: 2g
+
+  # Only used when RBA_MCP_MODE=docker. Start it with:
+  #     docker compose --profile mcp up
+  #
+  # Note what this service actually does, because it is not what it looks
+  # like: the app does NOT talk to it over the network. McpBackend builds a
+  # `docker run -i --rm ghcr.io/github/github-mcp-server` command and spawns a
+  # SIBLING container on the host daemon, which is why that mode needs
+  # /var/run/docker.sock mounted into `web` -- and that grants the container
+  # effective root on the host. This service only warms the image cache so the
+  # first spawn is not also a pull.
+  #
+  # The default stays RBA_MCP_MODE=remote for exactly that reason;
+  # `make_backend` falls back to remote cleanly if docker is unavailable.
+  github-mcp:
+    image: ghcr.io/github/github-mcp-server
+    profiles: ["mcp"]
+    env_file:
+      - path: .env
+        required: false
+    command: ["--version"]
+    restart: "no"
+
+volumes:
+  rba-cache: {}
+  rba-out: {}
