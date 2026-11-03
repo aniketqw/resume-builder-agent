@@ -1,0 +1,52 @@
+JORDAN RIVERA
+Course : M.Sc., Computer Science, 2027
+Email : jordan.rivera@example.edu
+Mobile : 5550143927
+CGPA : 8.04
+Links : github.com/example-user | linkedin.com/in/example-user
+SUMMARY
+M.Sc. Computer Science student building retrieval pipelines, evaluation harnesses and container tooling in Python and Go; looking for a backend or
+applied-ML internship.
+ACADEMIC DETAILS
+COURSE SPECIALIZATION INSTITUTE/COLLEGE BOARD/UNIVERSITY SCORE YEAR
+UG CSE (DISTRIBUTED SYSTEMS) Westbrook Institute Westbrook 8.52 CGPA 2025
+CLASS XII Northgate School CBSE 92.1% 2021
+CLASS X Northgate School CBSE 94.6% 2019
+Subjects / Electives Distributed Systems, Information Retrieval, Compilers, Advanced Databases, Operating Systems
+TECHNICAL SKILLS
+Languages Python, Go, TypeScript, SQL, Bash
+AI / LLM Retrieval-augmented generation, embeddings, prompt evaluation, tool-calling, structured output
+ML / Data scikit-learn, PyTorch, pandas, NumPy, feature pipelines, offline evaluation
+Data stores PostgreSQL, Redis, SQLite, Elasticsearch
+Cloud & DevOps Docker, Docker Compose, GitHub Actions, Nginx, Prometheus, Grafana
+INTERNSHIPS
+Backend Engineering Intern, Harbourline Systems Jun 2026 - Aug 2026
+Built an ingestion service in Go that normalises supplier feeds into a single schema, replacing three hand-maintained import scripts.
+Added contract tests around the feed parser so a malformed upstream payload fails loudly at the boundary instead of corrupting downstream tables.
+Instrumented the service with Prometheus counters and traced a p99 latency spike to an unbounded connection pool.
+PROJECTS
+Document Retrieval Service - Information Retrieval Sep 2026 - Present
+Tech: Python, FastAPI, PostgreSQL, Redis, Docker Compose, pytest
+Built a hybrid retrieval service that combines dense embeddings with BM25 and fuses the two with a weighted sum rather than reciprocal rank fusion.
+Wrote an offline evaluation harness that scores every change against a fixed query set, so a ranking tweak is accepted on evidence rather than on feel.
+Cached embeddings in Redis keyed by document hash, which made re-indexing an unchanged corpus effectively free.
+Container Build Cache - Developer Tooling Apr 2026 - Jul 2026
+Tech: Go, Docker, BuildKit, GitHub Actions
+Built a shared build cache for CI that keys layers on dependency manifests instead of on branch name.
+Added a cache-eviction policy driven by measured hit rate, and a dashboard showing which projects benefit and which do not.
+Wrote an integration suite that runs real builds in a disposable container rather than mocking the Docker API.
+Timetable Optimiser - Constraint Solving Jan 2026 - Apr 2026
+Tech: Python, OR-Tools, FastAPI, SQLite
+Modelled room, lecturer and cohort clashes as hard constraints and preferences as soft ones, then surfaced which constraint blocked a failed schedule.
+Added a what-if endpoint that reruns the solve with one constraint relaxed, so an administrator can see the cost of an exception.
+Observability Starter Kit - Platform Oct 2025 - Dec 2025
+Tech: Docker Compose, Prometheus, Grafana, Nginx, Python
+Packaged a single-command observability stack for small services, with dashboards that ship alongside the application rather than being rebuilt by hand.
+Wrote a smoke test that asserts every dashboard panel resolves against a live Prometheus instance, catching broken queries before release.
+POSITION OF RESPONSIBILITY
+Teaching Assistant, Data Structures, Westbrook Institute of Technology Aug 2026 - Present
+Supported 120 students across weekly labs; wrote the automated grading harness and the feedback templates used by the whole teaching team.
+CERTIFICATIONS
+CERTIFICATION CERTIFYING AUTHORITY
+Cloud Practitioner Essentials Example Cloud Academy
+Containers and Orchestration Fundamentals Example Foundation
