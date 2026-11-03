@@ -97,7 +97,9 @@ def _load_locked(local_only: bool):
         options = ort.SessionOptions()
         # 1 is right for Streamlit Community Cloud, which gives fractions of a
         # core. In a container you control it is leaving 2x on the table:
-        # measured on one 512-token text, 294 ms at 1 thread vs 149 ms at 4.
+        # measured on one 512-token text, 297 ms at 1 thread vs 83 ms at 4.
+        # (A full rescore is 292 ms -> 144 ms: it also pays for the BM25
+        # and skills channels, which do not parallelise here.)
         # Default stays 1 so nothing changes unless the deployment opts in.
         options.intra_op_num_threads = _env_int("RBA_ONNX_THREADS", 1)
         options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
