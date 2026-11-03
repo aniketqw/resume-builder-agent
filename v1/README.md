@@ -1,4 +1,8 @@
-# Resume Builder Agent
+# Resume Builder Agent — v1
+
+> **This is v1, the Streamlit app.** There is also a [v2](../v2) — a FastAPI
+> service with a browser workbench over the same engine. See the
+> [root README](../README.md) for what differs and which to use.
 
 [![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://aniketqw-resumebuilder.streamlit.app)
 
@@ -33,7 +37,7 @@ and LangSmith for tracing and evaluation.
 ### Option A — local virtualenv (works right now)
 
 ```bash
-git clone <this repo> && cd resume-builder-agent
+git clone <this repo> && cd resume-builder-agent/v1
 
 # Python 3.11+ is required.
 python3.11 -m venv .venv
@@ -53,10 +57,14 @@ uv venv --python 3.11 .venv && VIRTUAL_ENV=.venv uv pip install -e ".[dev]"
 ### Option B — Docker
 
 ```bash
-# Docker Desktop must be running first.
+# Docker Desktop must be running first. Run these from v1/ -- there is a
+# separate v2/docker-compose.yml for the web app.
 docker compose build
 docker compose run --rm rba doctor
 ```
+
+Note this image builds the **command-line tool**, not a server: no port is
+exposed and there is no UI. For a dockerised web app, that is [v2](../v2).
 
 The compose file mounts `/var/run/docker.sock` because the agent launches
 GitHub's MCP server as its own short-lived container.
@@ -64,7 +72,7 @@ GitHub's MCP server as its own short-lived container.
 ### Verify the install
 
 ```bash
-pytest                    # 185 tests, offline, no credentials needed
+pytest                  # 495 tests, offline, no credentials needed
 rba config                # shows which model each graph node routes to
 rba doctor                # live credential + reachability check
 ./scripts/scan_secrets.sh # confirms no key is tracked by git
@@ -344,6 +352,9 @@ about it, and each had been **silently destroying good output**:
 ---
 
 ## Layout
+
+Everything below lives under `v1/`; `v2/` is a sibling with its own copy of the
+engine. See the [root README](../README.md).
 
 ```
 src/rba/

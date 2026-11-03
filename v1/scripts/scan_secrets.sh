@@ -15,8 +15,13 @@ else
 fi
 
 echo "==> .env must never be tracked"
-if git ls-files --error-unmatch .env >/dev/null 2>&1; then
-  echo "FAIL: .env is tracked by git"; status=1
+# `git ls-files --error-unmatch .env` is cwd-relative, and CI runs this script
+# from the repository root -- so it only ever checked for a root .env that has
+# never existed, and never looked at v1/.env or v2/.env. Match at any depth.
+tracked_env="$(git ls-files '*.env' '.env' | grep -E '(^|/)\.env$' || true)"
+if [ -n "$tracked_env" ]; then
+  echo "FAIL: .env is tracked by git:"; echo "$tracked_env" | sed 's/^/  /'
+  status=1
 else
   echo "ok"
 fi

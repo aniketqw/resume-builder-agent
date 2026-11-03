@@ -4,14 +4,14 @@ on:
   push:
     branches: [main]
     paths:
-      - 'space/**'
-      - 'run.md'
-      - 'scripts/build_space.py'
-      - 'scripts/build_site.py'
-      - 'scripts/deploy_space.py'
-      - 'scripts/check_space.py'
-      - 'scripts/check_sample.py'
-      - 'tests/test_space_deploy.py'
+      - 'v1/space/**'
+      - 'v1/run.md'
+      - 'v1/scripts/build_space.py'
+      - 'v1/scripts/build_site.py'
+      - 'v1/scripts/deploy_space.py'
+      - 'v1/scripts/check_space.py'
+      - 'v1/scripts/check_sample.py'
+      - 'v1/tests/test_space_deploy.py'
       - '.github/workflows/deploy-huggingface.yaml'
   workflow_dispatch:
 
@@ -30,6 +30,9 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: v1
     steps:
       - uses: actions/checkout@v4
 
@@ -106,7 +109,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: huggingface-space-health
-          path: space-health.json
+          path: v1/space-health.json
           if-no-files-found: ignore
 
       - name: Report the result on the commit

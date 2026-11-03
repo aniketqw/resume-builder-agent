@@ -22,7 +22,7 @@ checkpoints/
 .cache/
 
 # offline eval fixtures (large repo clones)
-fixtures/repos/
+**/fixtures/repos/
 
 .DS_Store
 
@@ -31,3 +31,7 @@ space-health.json
 
 # Streamlit local secrets — never commit
 .streamlit/secrets.toml
+
+# v2: if webfonts are ever self-hosted they are build artefacts, not source.
+# The page currently ships none and falls back to system-ui.
+v2/web/fonts/*.woff2
