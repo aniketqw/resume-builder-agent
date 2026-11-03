@@ -1,387 +1,204 @@
 # Resume Builder Agent
 
-[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://aniketqw-resumebuilder.streamlit.app)
+Evidence-grounded resume builder. It reads a GitHub account, turns each
+repository into **evidence-backed facts**, and offers them as candidate resume
+lines — each showing exactly what it is worth against a real job description.
 
-**[Try the resume scorer →](https://aniketqw-resumebuilder.streamlit.app)** —
-paste a resume and a job description, see the score broken into three channels
-with the formula printed on the page. No sign-up, no API key.
+The governing rule: **the agent never invents an achievement or a number.** A
+claim that cannot be traced to repository evidence is not softened or hedged —
+it is dropped and replaced with a `[MEASURE: <command>]` task telling you how
+to go and measure it yourself.
 
-> The app sleeps after 12 hours without traffic. A cold link shows a
-> "Yes, get this app back up!" button — click it and give it about 30 seconds.
+![The v2 workbench: upload a resume, pick a role, paste a job description, and
+every line shows what it is worth](docs/v2-demo.gif)
 
-Starts from the resume you already have, reads a GitHub account, turns each
-repository into **evidence-backed facts**, and offers them as candidate lines
-you can accept one at a time -- each showing exactly what it is worth.
+*v2 in motion — a resume is parsed, scored against a role profile and then
+against a real posting, and unticking one line moves the headline and every
+per-line delta. Recorded from the running app by
+[`v2/scripts/capture_demo.py`](v2/scripts/capture_demo.py); the resume is an
+invented person.*
 
-Upload a PDF and it is parsed into its real structure (academic tables, dated
-entries, `Tech:` lines), re-rendered as a one-page PDF, LaTeX or ATS-safe text,
-and scored. Your resume is the baseline and is never rewritten: generated lines
-arrive switched off.
+This repository holds **two versions of the same product.**
 
-The governing rule: **the agent never invents an achievement or a number.** A claim
-that cannot be traced to repository evidence is not softened or hedged — it is
-dropped and replaced with a `[MEASURE: <command>]` task telling you how to go and
-measure it yourself.
-
-Built with LangGraph + LangChain + Groq, with TypeSafe/Jev for routing decisions
-and LangSmith for tracing and evaluation.
+```
+.
+├── v1/   Streamlit app  — shipped, deployed, feature-complete
+└── v2/   FastAPI + web  — in progress, the same engine behind a real UI
+```
 
 ---
 
-## Quickstart
+## Which one should I use?
 
-### Option A — local virtualenv (works right now)
+| | **v1** | **v2** |
+|---|---|---|
+| Status | **Shipped and stable** | **In progress** |
+| Interface | Streamlit | FastAPI + a static HTML/CSS/JS workbench |
+| How you run it | `streamlit run app.py` | `docker compose up` |
+| Deployed at | [Streamlit Community Cloud](https://aniketqw-resumebuilder.streamlit.app) | self-hosted |
+| Docker | CLI only (`ENTRYPOINT ["rba"]`, no server) | the whole app, one `compose up` |
+| Scoring engine | fused dense + BM25 + skills | **the same engine** |
+| Use it if | you want the working tool today | you are developing the new UI |
+
+**If you just want to score a resume, use v1.** v2 is where the interface is
+being rebuilt; it will replace v1 when it reaches parity.
+
+---
+
+## What is actually different
+
+Both versions share the same `src/rba` engine — the ONNX embedding model, the
+BM25 channel, the skills matcher, claim verification, the PDF/LaTeX renderers.
+**v2 does not reimplement scoring, and that is the point.** Everything below is
+about the layer above it.
+
+### 1. v2 has an HTTP API; v1 has none
+
+v1's Streamlit page calls Python functions directly in-process. There is no API
+and nothing else can drive it. v2 puts a FastAPI layer (`v2/src/rba_api/`) in
+front of the same functions, so the browser, `curl`, and tests all go through
+one documented surface.
+
+### 2. v2 is genuinely dockerized
+
+v1's `Dockerfile` builds the **command-line tool** — no port, no server, no web
+UI. "Docker" in v1 means `docker compose run --rm rba doctor`. v2 ships a
+multi-stage image that serves the actual application on port 8000, runs as a
+non-root user, pre-bakes the embedding model into the image so first use is not
+a 128 MB download, and has a healthcheck that fails if the dense scoring channel
+did not load.
+
+### 3. v2's UI can do things Streamlit structurally cannot
+
+A sticky two-pane workbench, a live paper preview of the resume in both the BITS
+and clean layouts, segmented per-item controls where every option shows its own
+measured score delta, and a role/pathway simulator. Streamlit's execution model
+reruns the script on every interaction, which is why v1's UI is a vertical form
+and not a workbench.
+
+### 4. v2 shows where the score comes from, not a different score
+
+v2 keeps the shape of a familiar scorecard but **re-sources every number**. In
+particular it does **not** show a seven-bar rubric summing to 100. Those weights
+were invented — nobody measured that a missing phone number is worth exactly six
+points — and `v1/src/rba/resume/diagnostics.py` already says so in its own
+docstring. v2 shows the three real channels (dense 0.5 / lexical 0.2 /
+skills 0.3) and uses the rubric only for *advice*: which keyword is missing,
+whether the resume is too long. Advice does not need a weight to be worth reading.
+
+Two further rules v2 holds itself to:
+
+- **The browser never computes a score.** It renders numbers the server sent.
+  The obvious client-side shortcut — approximating a document's embedding by
+  pooling its bullets' — was measured in `attribution.py` and agreed on *sign*
+  for only 14 of 20 bullets. A number that is wrong about its own direction is
+  worse than no number, so pending cells show a dim `·` and wait.
+- **Improvement steps state a measured gain, never an estimated one.** v1
+  derived a plan step's gain from keyword arithmetic. v2 applies the step and
+  actually rescores the resulting document.
+
+### 5. v2 asks before it grounds against the wrong repository
+
+v2 adds a blocking confirmation step after a GitHub import, where you confirm
+which repository each project maps to. `matching.py` explains why this matters:
+grounding a project against the wrong repository verifies real claims against
+unrelated evidence — stripping true statements and keeping false ones.
+
+---
+
+## Running v1
 
 ```bash
-git clone <this repo> && cd resume-builder-agent
+cd v1
+python3.11 -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+cp .env.sample .env     # fill in the four keys
+rba doctor              # verifies every credential and provider
+streamlit run app.py
+```
 
-# Python 3.11+ is required.
-python3.11 -m venv .venv
-source .venv/bin/activate
+Full detail, including credentials and how the agent works: [`v1/README.md`](v1/README.md).
+
+## Running v2
+
+```bash
+cd v2
+python3.11 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 
-cp .env.sample .env     # then fill in the four keys (see "Credentials" below)
-rba doctor              # verifies every credential and provider
+# The defaults are tuned for a 1 GB container, not your laptop. On a real
+# machine this is the difference between 294 ms and 84 ms per score.
+RBA_ONNX_THREADS=4 RBA_EMBED_BATCH=16 uvicorn rba_api.app:app --port 8000
 ```
 
-`uv` is faster if you have it:
+Or in Docker, which bakes the embedding model into the image so the container
+never needs the network to score:
 
 ```bash
-uv venv --python 3.11 .venv && VIRTUAL_ENV=.venv uv pip install -e ".[dev]"
+cd v2
+docker compose up --build
+# open http://localhost:8000
 ```
 
-### Option B — Docker
+**No credentials are needed to upload a resume and score it** — that path is
+local and deterministic, and `.env` is optional. You only need keys for the
+GitHub import.
 
-```bash
-# Docker Desktop must be running first.
-docker compose build
-docker compose run --rm rba doctor
-```
+Use a **separate virtualenv** from v1: both packages install a console script
+called `rba`, so sharing one environment means whichever was installed last
+wins.
 
-The compose file mounts `/var/run/docker.sock` because the agent launches
-GitHub's MCP server as its own short-lived container.
-
-### Verify the install
-
-```bash
-pytest                    # 185 tests, offline, no credentials needed
-rba config                # shows which model each graph node routes to
-rba doctor                # live credential + reachability check
-./scripts/scan_secrets.sh # confirms no key is tracked by git
-```
-
-### Use it
-
-```bash
-rba run <github-username> --dry-run     # projects the token spend, spends nothing
-rba run <github-username>               # full run; pauses for your review
-rba resume-run --thread default         # continue after reviewing
-python evals/run_eval.py --no-geval     # quality harness
-```
-
-Output lands in `out/`: `report.md`, one `resume_<role>.tex` per role, and PDFs
-if a LaTeX engine is installed.
+v2 defaults to GitHub's hosted MCP endpoint and does **not** mount your Docker
+socket. The self-hosted path is opt-in and explained, with its trade-off, in
+[`v2/README.md`](v2/README.md).
 
 ---
 
-## Credentials
-
-Put these in `.env` (gitignored; never commit it). `.env.sample` lists the names.
-
-| Variable | What it is | Where to get it |
-|---|---|---|
-| `GROQ_API_KEY` | LLM for summaries, resumes, planning | console.groq.com/keys |
-| `TYPESAFE_API_KEY` | Jev System One, for routing decisions | console.typesafe.ai/keys |
-| `LANGSMITH_API_KEY` | Tracing and evaluation | smith.langchain.com |
-| `GITHUB_PERSONAL_ACCESS_TOKEN` | Read-only repo access | see below |
-
-### GitHub access
-
-The agent talks to GitHub through the **official GitHub MCP server**. The default
-is GitHub's hosted endpoint at `https://api.githubcopilot.com/mcp/x/repos/readonly`,
-which needs no Docker.
-
-That exact path is deliberate. Enumerating both endpoints:
-
-| Endpoint | Tools | Write tools |
-|---|---:|---|
-| `/mcp/` | 46 | `create_or_update_file`, `delete_file`, `push_files`, `create_repository`, `fork_repository`, `merge_pull_request` |
-| `/mcp/x/repos/readonly` | 13 | none |
-
-The agent refuses to start if a write tool shows up in the toolset. Set
-`github.mcp.mode: docker` in `config.yaml` to run `ghcr.io/github/github-mcp-server`
-locally with `--read-only` instead, which is also a hard gate.
-
-Two behaviours worth knowing:
-
-- `search_repositories` (there is no `list_repositories`) **excludes forks**, which
-  is why MCP returns 98 repos where REST returns 113. It does return all private
-  repos. Forks are excluded by rule anyway.
-- There is **no `get_repository_tree`** on the hosted endpoint — it lives in the
-  `git` toolset, which only the local container exposes. Walking a tree with
-  `get_file_contents` costs one call per directory; across ~100 repos that was
-  ~500 calls, after which the endpoint started returning empty trees and the
-  session timed out. Trees therefore come from a single REST call
-  (`github.mcp.tree_via_rest`, on by default). Sessions are also rebuilt
-  automatically when they die mid-sweep.
-
-Three ways to authenticate, in order of preference:
-
-1. **Fine-grained PAT** (least privilege): repository permissions
-   `Contents: Read-only` + `Metadata: Read-only`.
-2. **Classic PAT** with `repo` scope. Works, but classic tokens have no read-only
-   repo scope — `repo` grants write too, which is why `--read-only` matters. The
-   server reads your `X-OAuth-Scopes` header and hides tools you lack.
-3. **Already using `gh`?** `GITHUB_PERSONAL_ACCESS_TOKEN=$(gh auth token)`.
-
-To run against a different account, change `GITHUB_PERSONAL_ACCESS_TOKEN` and
-`GITHUB_USERNAME`. Nothing else is account-specific.
-
-Set `github.mcp.mode: remote` in `config.yaml` to use GitHub's hosted endpoint
-(`https://api.githubcopilot.com/mcp/`) instead of a local container, or
-`mode: rest` for a dependency-free REST fallback.
-
----
-
-## How it works
+## Repository layout
 
 ```
-connect_github     MCP, read-only
-list_repos         all repos for the account
-select_repos       Jev scores every repo for "claimable"; keep the top N
-fetch_facts        deterministic: README, tree, languages, commits, tests, CI
-safety_scan        flags .env / tokens / cookies committed in your repos
-summarize_repo     strict JSON, one repo per call, rate limited
-verify_claims      CODE, not a prompt: unsupported claims are dropped
-score_roles        deterministic 100-point ATS rubric
-build_resumes      bullets drawn only from verified claims
-compare            table built in Python; model writes a short rationale
-plan_improvements  evidence-linked pathways with hours and ATS gain
-human_review       pauses for your edits (LangGraph interrupt)
-report             Markdown + LaTeX + PDF
+.
+├── README.md                this file
+├── .github/workflows/       CI runs both versions independently
+├── v1/
+│   ├── app.py               the entire Streamlit UI
+│   ├── src/rba/             the engine
+│   ├── tests/               offline suite
+│   ├── evals/  scripts/  space/
+│   └── README.md            v1's full documentation
+└── v2/
+    ├── src/rba/             the engine (v2's own copy, free to evolve)
+    ├── src/rba_api/         FastAPI layer
+    ├── web/                 the browser workbench (no build step)
+    ├── tests/
+    └── README.md            v2's full documentation
 ```
 
-State is checkpointed to SQLite, so a run that stalls on a rate limit resumes
-exactly where it stopped rather than starting over.
+v2 carries its **own copy** of the engine rather than importing v1's, so each
+version builds, tests and ships without reference to the other. The trade-off is
+deliberate: an engine fix has to be applied in both places, and the exactness
+tests in `v2/tests/` exist to catch v2 drifting away from v1's numbers.
 
-### Why claims survive or die
+## What v2 looks like
 
-`verify_claims` is plain Python. Every digit string and every technology name in a
-generated claim must appear in that repository's fact bundle. If it does not, the
-claim is demoted — it never reaches the resume. Forks and single-commit repos are
-flagged "not claimable" by commit-share analysis and excluded entirely. The
-large model that writes the improvement plan never sees raw repository content,
-only claims that already passed verification.
-
----
-
-## Operating inside the free tier
-
-These numbers were measured against the live API, not read off a pricing page.
-
-**Tokens bind; requests do not.** Measured cold over 10 real repositories
-(`python scripts/measure_budget.py --repos 10 --cold`, full write-up in
-[`evals/budget.md`](evals/budget.md)): **1 request and 3,058 tokens per repo**,
-of which 79% is prompt. At one call per repo, even 110 repos is 110 requests --
-11% of the 1,000/day limit. It is the token budget that runs out.
-
-Two findings from that measurement worth stating plainly:
-
-- **Groq prefix caching never fired for us.** Identical system prefixes at 771,
-  1,461 and 2,841 tokens, and the real 631-token prompt sent five times back to
-  back, all returned `cached_tokens: 0`. Any plan that relies on cached tokens
-  being exempt from rate limits is unsupported on this account.
-- **There is no daily-token header.** Groq exposes only
-  `x-ratelimit-limit-requests: 1000` and `x-ratelimit-limit-tokens: 8000`. The
-  200,000/day figure is documented but not observable, so it cannot be verified
-  from a response.
-
-The 8,000 tokens-per-minute ceiling is real and is what produces the 429
-backoffs during a cold run.
-
-Measured on a real account (113 repos, 98 non-fork):
-
-| Stage | Work | Cost | Time |
-|---|---|---|---|
-| list + signals | 98 repos, 55 with a README | 0 LLM tokens | ~20 s |
-| Jev selection | 79 repos scored, 25 selected | 63,011 input tokens, **$0.0027** | ~10 s |
-| fetch facts | 25 repos, 23 READMEs, 11 test suites | 0 LLM tokens | ~90 s |
-| summarize | 25 repos, 151 claims | ~52,000 Groq tokens | ~9 min |
-| verify | 139/151 verified, 7 rejected | 0 tokens (pure Python) | <1 s |
-| resumes + plan | 5 resumes, 10 plan steps | ~12,000 Groq tokens | ~2 min |
-| re-run (cached) | same 25 repos | **0 tokens, 0 s** | 100% cache hit |
-
-Only the summarize/resume/plan stages spend Groq tokens. Everything upstream —
-including the decision about which repos are worth summarizing at all — is free
-or costs fractions of a cent, which is the entire point of the split.
-
-What the implementation does about it:
-
-- **Per-model token buckets.** Limits are per-model, so routing a step to a
-  different tier also buys throughput.
-- **Headers are truth.** Token estimates are reconciled after every call against
-  `x-ratelimit-remaining-tokens`; `retry-after` is honoured exactly on a 429.
-- **Jev takes the cheap decisions.** Scoring ~100 repos for "is this claimable"
-  runs on TypeSafe's Jev instead of Groq: output tokens are free, input is
-  $0.042/Mtok, and it draws on a separate quota. Roughly $0.002 for the sweep.
-- **SQLite cache** keyed by `(repo, head SHA, prompt version, model)` — an
-  unchanged repo costs zero tokens on a re-run.
-- **Clean daily stop** at 90% of the daily budget, with a checkpoint.
-- `--dry-run` prints projected token spend per node before spending anything.
-
-### Two API behaviours worth knowing
-
-1. **The reasoning trap.** `openai/gpt-oss-*` models spend the completion budget
-   on an internal `reasoning` field. With a small `max_tokens` they return
-   `content: ""` and HTTP 200 — a success that looks like a model failure. Every
-   request here forces `reasoning_effort: "low"` and a floor on `max_tokens`,
-   and there is a regression test for it.
-2. **Structured output excludes tool use and streaming.** A Groq request may use
-   `response_format: json_schema` *or* tool calling, never both. That is why
-   `fetch_facts` (tools) and `summarize_repo` (strict JSON) are separate nodes.
-
-Model IDs live in `config.yaml`, never in code — Groq's lineup moves fast.
-`rba doctor` fails loudly if a configured model has disappeared.
-
----
-
-## Quality: how we know the summaries are any good
-
-Three layers, built on published metrics rather than vibes.
-
-1. **Groundedness gate (blocking).** RAGAS-style faithfulness: decompose each
-   bullet into atomic claims, then a binary supported/unsupported verdict per
-   claim against that repo's evidence. Any unsupported numeric, scope, impact or
-   technology claim rejects the bullet. Surviving claims keep their evidence ID.
-2. **Summary quality (tracked).** G-Eval over the four SummEval dimensions —
-   coherence, consistency, fluency, relevance — using probability-weighted
-   scoring, randomized option order and n≥3 samples to blunt known LLM-judge bias.
-3. **Regression suite.** Code Consistency and Information Retrieval coverage over
-   a frozen held-out set of real repositories.
-
-Run it:
-
-```bash
-python evals/run_eval.py                # faithfulness + G-Eval, traces to LangSmith
-python evals/run_eval.py --no-geval     # faithfulness only, much cheaper
-```
-
-### Measured quality
-
-From `evals/run_eval.py`, judged by `gpt-oss-120b`:
-
-| Metric | Result | Blocking? |
-|---|---:|---|
-| **claim faithfulness** — the text that reaches a resume | **1.00** | yes |
-| **number precision** — numbers traceable to evidence | **1.00** | yes |
-| whole-summary faithfulness — *includes unverified prose* | 0.83 | tracked |
-
-That gap is the honest part. `verify_claims` governs the **claims**, and those
-are fully grounded. The descriptive `problem` and `approach` fields are framing
-and are *not* verified, so they can contain fair-sounding inference — "the
-original model does not account for distance between data points" is a
-reasonable reading of a repository's purpose and still nowhere in its README.
-The two are measured separately rather than averaged into one flattering
-number, and only claims reach a resume.
-
-### Reproducibility, measured
-
-Two independent runs over the same repositories, both at `temperature: 0`:
-
-| Half of the pipeline | Result |
+| | |
 |---|---|
-| Verification (`verify_claims`) | **Identical.** Same 102/111 verdicts, the same 6 rejections, the same reasons. |
-| Generation (`build_resumes`) | **Variable.** ATS scores moved by up to **24 points** (`balanced` 59.1 → 34.8). |
+| ![The workbench in light mode](docs/v2-workbench-light.png) | ![The same workbench in dark mode](docs/v2-workbench-dark.png) |
 
-That split is the design working as intended, not an accident: the half that
-decides what may be *said* is deterministic Python, so it cannot drift. The
-half that decides *how* to say it is a language model, and Groq's `gpt-oss`
-models are not reproducible even at temperature 0.
+The paper preview stays white in both themes on purpose: it is a preview of
+something that gets printed and emailed.
 
-The practical consequence is worth stating plainly: **treat a single ATS score
-as indicative, not precise.** What is stable is which claims are allowed
-through — and that is the property the project actually promises.
+![Importing projects from GitHub](docs/v2-github-import.png)
 
-### What judging actually changed
+Imported lines arrive **switched off**, each showing the measured gain if you
+accept it. Your resume is the baseline and is never rewritten.
 
-The first live run was judged against the real repositories, and the output was
-wrong in ways the tests had not caught:
+## Tests
 
-- The technology check scanned claim prose for "technology-shaped" tokens and
-  **rejected 39 of 48 real claims** over words like `fallback.` and `scripts.` —
-  a trailing period made them look like package names.
-- The impact regex matched bare nouns, so "MongoDB is used for **saving** and
-  searching documents" was flagged as an unmeasured performance claim.
-- Version masking used `\d+\.\d+`, which swallowed `0.81 accuracy` and `49.8%` —
-  precisely the numbers the module exists to police.
-- A claim about `tcell` cited a real `go.mod` line about `goccy/go-json`. The
-  quote existed, so it passed; it supported nothing in the claim.
-
-After those fixes, on 8 repositories: **48 of 51 claims verified, and all three
-rejections were correct.** The best of them: the model wrote *"losing 745 out of
-1484"*, having computed `1484 − 739` itself. The evidence contains 739 and 1484
-but never 745, so the claim was refused. That is the system working.
-
-Three later bugs were each caught by running the thing rather than reasoning
-about it, and each had been **silently destroying good output**:
-
-- `_strictify` stripped `title`, `default` and `examples` as noisy JSON-Schema
-  annotations — including when they were the model's own **field names**. The
-  plan schema lost its `title` field, so every generated step failed validation
-  and the planner burned nine minutes on retries. One plan call now takes 3 s.
-- The provenance check read the digits in claim-id citations as invented
-  numbers: the generator appends `(AiAgnoSample#0, #1)` — and, unprompted, the
-  full-width `【AOA_Controller_ty#0】` — so `#0` parsed as the number 0. This
-  dropped **19 legitimate bullets in one run and 8 more in the next**. After
-  the fix, all five resumes build with zero false drops and the balanced
-  resume went from 32.9 to 61.2/100.
-- The rate-limit header override never expired. `x-ratelimit-remaining-tokens`
-  is a snapshot of the current minute, but it was cached forever, so once a
-  response reported a low figure the limiter believed it had no budget for the
-  life of the process and slept a full minute before every call. A 3-second
-  judge call became one that never finished.
-
----
-
-## Layout
-
-```
-src/rba/
-  config.py       config.yaml + .env loading, tier routing
-  limiter.py      per-model TPM/RPD buckets, header reconciliation
-  groq_client.py  retries, strict JSON, the reasoning-trap guard
-  jev_client.py   TypeSafe System One: noul / choice / score
-  schema.py       Pydantic -> Groq strict JSON schema
-  cache.py        SQLite response cache
-  github_tools.py MCP client (docker | remote | rest)
-  scoring.py      keyword/number/verb detectors, reused by diagnostics
-  ats/            BM25 + ONNX dense + skills, convex fusion, calibration
-  resume/
-    document.py   Bullet/Entry/Table/KeyValues/Header -- the editable model
-    ingest.py     PDF -> structure, deterministic, no LLM
-    merge.py      generated lines as opt-in candidates
-    diagnostics.py  advice, deliberately carrying no invented weights
-    attribution.py  exact leave-one-out per-bullet impact
-    render/       plain, html, pdf (fpdf2), latex
-  nodes/          one module per graph node
-  roles.yaml      role definitions and keyword tables
-  prompts/        versioned prompt files
-evals/            faithfulness + G-Eval judges, golden fixtures
-tests/            offline suite with fakes
-scripts/          secret scanner, token-budget measurement
-fixtures/         real extracted resume text, so parsing is tested offline
+```bash
+cd v1 && python -m pytest     # 495 tests, offline
+cd v2 && python -m pytest     # 540 tests, offline
 ```
 
----
-
-## Safety
-
-- `.gitignore` containing `.env` is the **first commit** in this repository's
-  history, before any other file was ever staged.
-- `scripts/scan_secrets.sh` greps the tracked tree *and* full git history for
-  Groq, LangSmith, TypeSafe and GitHub token patterns. It runs in CI and gates
-  every push.
-- The GitHub MCP server runs `--read-only`.
-- Private repository contents are never logged.
-- `safety_scan` reports secrets it finds committed in *your* scanned repos, which
-  is often the single most valuable output of a first run.
+Both suites run fully offline against fakes, with dummy credentials. If a test
+needs a real credential, that test is wrong.

@@ -1,0 +1,63 @@
+ANIKET SAXENA
+Course : M.E., Software Systems, 2027
+Email : h20250169@pilani.bits-pilani.ac.in
+Mobile : 9305053437
+CGPA : 7.62
+Links : github.com/aniketqw | linkedin.com/in/aniket-saxena-8a5328233
+SUMMARY
+M.E. Software Systems student building LLM agents, RAG and ingestion pipelines and sandboxed code-execution tools with LangChain and LangGraph; seeking an
+AI engineering internship.
+ACADEMIC DETAILS
+COURSE SPECIALIZATION INSTITUTE/COLLEGE BOARD/UNIVERSITY SCORE YEAR
+UG CSE (AI AND MACHINE
+LEARNING)
+VIT Amravati VIT 8.71 CGPA 2025
+CLASS XII Stella Maris School ICSE 91.4% 2020
+CLASS X Stella Maris School ICSE 92.8% 2018
+Subjects / Electives Software Testing, Data Mining, Advanced Operating System, Advanced Database, Software for Embedded System
+TECHNICAL SKILLS
+Languages Python, C, Java, JavaScript, TypeScript, SQL; C++ (data-structures practice)
+AI / LLM LangChain, LangGraph, RAG, Hugging Face, Ollama, vLLM, Qwen, fine-tuning (MLX)
+ML / Data PyTorch, PyTorch Lightning, scikit-learn, TensorFlow (coursework notebook), CNN/ResNet, time-series forecasting (Chronos), logistic
+regression
+Data stores PostgreSQL (replicas), MongoDB, Redis (cache, Streams), Prisma, Kafka (custom partitioner)
+Cloud & DevOps Docker, Docker Compose, Nginx, Git, GitHub, Hugging Face Spaces; AWS Academy and IBM Kubernetes certified
+INTERNSHIPS
+Software Firmware Engineer, Marvell Semiconductors May 2026 - Jul 2026
+Built a live runtime digital twin of an SDN data-center fabric from real controller state, enabling production-safe pre-deployment validation and failure prediction.
+Developed a telemetry-driven fault intelligence system that maps hardware health signals to automated multi-tier corrective actions.
+Designed behavioral workload identification from traffic patterns, separating AI training from conventional workloads without self-reported identity.
+PROJECTS
+Resume Builder Agent - LLM Agents Oct 2026 - Present
+Tech: Python, LangGraph, LangChain, Groq, GitHub MCP, Pydantic, SQLite, pytest
+Built a LangGraph agent (12-node graph with SQLite checkpointing and a human-review interrupt) that reads a GitHub account through the read-only GitHub
+MCP server and turns each repository into evidence-linked facts.
+Wrote claim verification as plain Python, not a prompt: every number and quote in a generated claim must appear in the repository evidence, and unsupported
+claims become measurement tasks; covered by 28 tests.
+Added a deterministic 100-point ATS scorer, a token-bucket rate limiter for Groq free-tier limits and a SQLite response cache; 199 offline tests pass.
+Sandboxed Code-Execution Agent - LLM Agents Apr 2026 - May 2026
+Tech: Python, LangGraph, LangChain, Docker, Playwright, Ollama
+Built a LangGraph agent that runs code in a Docker container sandbox, with tools for shell, Python execution, file I/O, HTTP requests and Playwright browser
+automation.
+Added a switchable LLM layer (Anthropic-compatible proxy or local Ollama) and wrote a 14-case integration script that exercises the tools.
+VisionDev - Computer Vision Jan 2026 - May 2026
+Tech: Python, PyTorch Lightning, scikit-learn, LangChain, vLLM, Qwen2.5-VL
+Built a PyTorch Lightning callback pipeline that logs CIFAR-10 misclassifications and clusters them by distortion type (blur, JPEG, pixelation, noise); a YOLO
+classifier labelled 49% of failures as blur.
+Used a vLLM-served Qwen2.5-VL model through LangChain to turn failure clusters into diagnostic reports with architecture and augmentation recommendations.
+Multi-University Bounty Platform - Full-stack Jan 2026 - May 2026
+Tech: Next.js, Express.js, PostgreSQL, Prisma, Redis, MongoDB, Docker Compose, Nginx, JWT
+Built a multi-university bounty platform with Next.js and Express (JWT auth, bidding, submission review, reputation log) in a 3-person team.
+Split read and write paths with a PostgreSQL primary and read replica via Prisma; guarded bid acceptance with Serializable transactions to stop double-accept
+races.
+Added Redis caching and Redis Streams events with background workers that sync a denormalised MongoDB catalog for search.
+Containerised the API, workers, databases and Nginx reverse proxy with Docker Compose for single-command startup.
+POSITION OF RESPONSIBILITY
+Teaching Assistant, Artificial Intelligence, BITS Pilani Aug 2026 - Present
+Mentored 99+ students building a multimodal agricultural knowledge base; defined data-curation pipelines, quality benchmarks and feature-extraction standards
+across vision, text and spatial data.
+CERTIFICATIONS
+CERTIFICATION CERTIFYING AUTHORITY
+AWS Academy Graduate - Cloud Architecting Amazon Web Services (AWS)
+Containers & Kubernetes Essentials IBM
+AWS Academy Graduate - Cloud Foundations - Training Amazon Web Services (AWS)

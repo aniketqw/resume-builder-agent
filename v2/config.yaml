@@ -1,0 +1,91 @@
+# Model IDs live here, never in code — Groq's lineup changes fast.
+# Verified against GET https://api.groq.com/openai/v1/models on 2026-10-28.
+groq:
+  base_url: https://api.groq.com/openai/v1
+  tiers:
+    small:    openai/gpt-oss-20b
+    mid:      openai/gpt-oss-20b
+    big:      openai/gpt-oss-120b
+    fallback: qwen/qwen3.8-27b      # json_object only; langchain-groq drops strict=True here
+  # Free-tier limits, confirmed from x-ratelimit-* response headers.
+  # Buckets are per-model, so tier routing also buys throughput.
+  limits:
+    default: {rpm: 30, rpd: 1000, tpm: 8000, tpd: 200000}
+    "openai/gpt-oss-safeguard-20b": {rpm: 3, rpd: 1000, tpm: 2000, tpd: 200000}
+  # gpt-oss models burn the completion budget on a `reasoning` field and return
+  # an EMPTY `content` if max_tokens is small. Both settings below are required.
+  defaults:
+    reasoning_effort: low
+    # Summaries with several evidence-linked claims need real room: at 1200 a
+    # live run hit "max completion tokens reached" and lost a whole repo.
+    max_tokens: 2500
+    temperature: 0
+  # Stop cleanly before hitting a hard daily wall.
+  daily_stop_fraction: 0.9
+  token_estimate_margin: 0.10
+  max_retries: 5
+
+jev:
+  base_url: https://api.typesafe.ai
+  model: jev-latest
+  # Used ONLY for routing/selection. Never writes resume text.
+  enabled: true
+
+# Which node runs on which tier.
+routing:
+  summarize_repo:    small
+  build_resumes:     mid
+  compare:           big
+  plan_improvements: big
+  judge:             big
+
+selection:
+  max_repos: 25
+  min_claimable: 0.45
+  exclude_forks: true
+  min_commits: 2
+
+github:
+  mcp:
+    # "remote" uses GitHub's hosted MCP endpoint with a PAT — no Docker needed.
+    # "docker" runs ghcr.io/github/github-mcp-server over stdio with --read-only.
+    # "rest"   is the dependency-free fallback via the GitHub REST API.
+    mode: remote
+    image: ghcr.io/github/github-mcp-server
+    toolsets: [context, repos, git]
+    read_only: true
+    # The /x/repos/readonly path is deliberate. Verified by enumerating both:
+    # the plain /mcp/ endpoint hands out 46 tools INCLUDING delete_file,
+    # push_files and create_repository; /x/repos/readonly returns 13 tools and
+    # zero write tools. The agent refuses to start if a write tool shows up.
+    remote_url: https://api.githubcopilot.com/mcp/x/repos/readonly
+    # The hosted endpoint has no get_repository_tree (that tool lives in the
+    # `git` toolset, which only the local container exposes). Walking the tree
+    # with get_file_contents costs one call per directory: for ~100 repos that
+    # was ~500 calls, after which the endpoint returned empty trees and timed
+    # out. The REST trees API does the same job in one call per repo.
+    # Set false to stay strictly on MCP and accept the bounded walk.
+    tree_via_rest: true
+  fetch:
+    readme_max_chars: 6000
+    max_tree_files: 120
+    max_commits: 30
+
+summarize:
+  # ~4 chars per token. 7000 chars keeps one summarization call near 2k input
+  # tokens; measured cost of a real one was 2,074 total tokens.
+  max_evidence_chars: 7000
+
+plan:
+  max_steps_per_role: 5
+
+report:
+  out_dir: out
+  # Which resumes to build. Matches the keys in src/rba/roles.yaml.
+  roles:
+    - ai_llm_agent_engineer
+    - ml_engineer
+    - backend_platform_engineer
+    - data_scientist
+    - balanced
+  contact: ""   # e.g. "Name | you@example.com | github.com/you | +91 ..."

@@ -1,0 +1,93 @@
+{
+ "description": "Job descriptions used only as a document-frequency background for BM25 IDF. Not training data, not labels.",
+ "jobs": [
+  {
+   "family": "backend",
+   "text": "Backend Engineer. Build and operate REST APIs in Python with FastAPI. Required: Python, Docker, PostgreSQL, REST APIs, unit testing. Preferred: Kubernetes, AWS, Kafka, Redis. You will own services in production and participate in on-call."
+  },
+  {
+   "family": "frontend",
+   "text": "Frontend Engineer. Build accessible user interfaces. Required: JavaScript, TypeScript, React, CSS, HTML. Preferred: Next.js, GraphQL, testing with Jest. You will work closely with designers and ship to millions of users."
+  },
+  {
+   "family": "fullstack",
+   "text": "Full Stack Engineer. Required: JavaScript, React, Node.js, SQL, REST APIs. Preferred: TypeScript, Docker, AWS. Build features end to end from database to interface."
+  },
+  {
+   "family": "sre",
+   "text": "Site Reliability Engineer. Required: Kubernetes, Terraform, Linux, monitoring, incident response. Preferred: AWS, Prometheus, Go, Python. Keep production reliable and automate toil."
+  },
+  {
+   "family": "data_engineer",
+   "text": "Data Engineer. Required: Python, SQL, ETL, data pipelines, Airflow. Preferred: Spark, Kafka, dbt, Snowflake. Build and maintain batch and streaming pipelines."
+  },
+  {
+   "family": "data_scientist",
+   "text": "Data Scientist. Required: Python, pandas, statistics, machine learning, SQL. Preferred: scikit-learn, experimentation, A/B testing, visualisation. Turn data into decisions."
+  },
+  {
+   "family": "ml_engineer",
+   "text": "Machine Learning Engineer. Required: Python, PyTorch, model training, evaluation, deployment. Preferred: TensorFlow, MLOps, Docker, Kubernetes, GPU optimisation. Ship models to production."
+  },
+  {
+   "family": "llm_engineer",
+   "text": "AI Engineer. Build LLM applications. Required: Python, large language models, prompt engineering, RAG, evaluation. Preferred: LangChain, LangGraph, vector databases, agents, guardrails."
+  },
+  {
+   "family": "mobile",
+   "text": "Mobile Engineer. Required: Swift, iOS, UIKit, REST APIs. Preferred: SwiftUI, Combine, unit testing. Ship consumer applications to the App Store."
+  },
+  {
+   "family": "android",
+   "text": "Android Engineer. Required: Kotlin, Android SDK, Jetpack, REST APIs. Preferred: Compose, coroutines, testing. Build and maintain a consumer Android application."
+  },
+  {
+   "family": "java_backend",
+   "text": "Backend Engineer, Java. Required: Java, Spring Boot, PostgreSQL, REST APIs, microservices. Preferred: Kafka, Docker, Kubernetes. Maintain high-throughput services."
+  },
+  {
+   "family": "golang",
+   "text": "Platform Engineer. Required: Go, Linux, Docker, networking, distributed systems. Preferred: Kubernetes, gRPC, observability. Build internal platform components."
+  },
+  {
+   "family": "devops",
+   "text": "DevOps Engineer. Required: CI/CD, Docker, Linux, scripting, cloud infrastructure. Preferred: Terraform, Kubernetes, AWS, Jenkins, GitHub Actions. Automate build and deployment."
+  },
+  {
+   "family": "security",
+   "text": "Security Engineer. Required: application security, threat modelling, code review, vulnerability management. Preferred: Python, cloud security, penetration testing, SIEM."
+  },
+  {
+   "family": "qa",
+   "text": "QA Engineer. Required: test automation, test planning, bug tracking, regression testing. Preferred: Selenium, Python, CI/CD, performance testing."
+  },
+  {
+   "family": "product",
+   "text": "Product Manager. Required: roadmap, stakeholder management, user research, prioritisation, analytics. Preferred: SQL, experimentation, technical background."
+  },
+  {
+   "family": "analyst",
+   "text": "Data Analyst. Required: SQL, Excel, dashboards, reporting, data analysis. Preferred: Python, Tableau, Power BI, statistics. Support decisions with analysis."
+  },
+  {
+   "family": "embedded",
+   "text": "Embedded Engineer. Required: C, C++, microcontrollers, firmware, debugging. Preferred: RTOS, hardware interfaces, UART, signal processing."
+  },
+  {
+   "family": "marketing",
+   "text": "Marketing Manager. Required: campaign strategy, copywriting, analytics, content, brand. Preferred: SEO, paid acquisition, marketing automation."
+  },
+  {
+   "family": "teacher",
+   "text": "Secondary Teacher. Required: lesson planning, classroom management, curriculum, assessment, safeguarding. Preferred: subject specialism, pastoral care."
+  },
+  {
+   "family": "nurse",
+   "text": "Registered Nurse. Required: patient care, clinical assessment, medication administration, record keeping. Preferred: acute care experience, mentoring."
+  },
+  {
+   "family": "accountant",
+   "text": "Accountant. Required: financial reporting, reconciliations, ledgers, compliance, Excel. Preferred: ACCA, audit experience, ERP systems."
+  }
+ ]
+}

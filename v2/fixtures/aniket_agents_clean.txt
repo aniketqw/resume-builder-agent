@@ -1,0 +1,59 @@
+ANIKET SAXENA
+h20250169@pilani.bits-pilani.ac.in  |  9305053437  |  github.com/aniketqw  |  linkedin.com/in/aniket-saxena-8a5328233
+SUMMARY
+M.E. Software Systems student building LLM agents, RAG and ingestion pipelines and sandboxed code-execution tools with
+LangChain and LangGraph; seeking an AI engineering internship.
+EDUCATION
+BITS Pilani, M.E. Software Systems, CGPA 7.62 2027
+VIT Amravati, B.Tech CSE (AI and Machine Learning), CGPA 8.71 2025
+Stella Maris School, Class XII ICSE 91.4%; Class X ICSE 92.8% 2020 / 2018
+Electives: Software Testing, Data Mining, Advanced Operating system, Advanced Database, Software for embedded system.
+TECHNICAL SKILLS
+Languages: Python, C, Java, JavaScript, TypeScript, SQL; C++ (data-structures practice)
+AI / LLM: LangChain, LangGraph, RAG, Hugging Face, Ollama, vLLM, Qwen, fine-tuning (MLX)
+ML / Data: PyTorch, PyTorch Lightning, scikit-learn, TensorFlow, CNN/ResNet, time-series forecasting (Chronos), logistic
+regression
+Data stores: PostgreSQL (replicas), MongoDB, Redis (cache, Streams), Prisma, Kafka (custom partitioner)
+Cloud & DevOps: Docker, Docker Compose, Nginx, Git, GitHub, Hugging Face Spaces; AWS Academy and IBM Kubernetes
+certified
+EXPERIENCE
+Software Firmware Engineer, Marvell Semiconductors May 2026 - Jul 2026
+Built a live runtime digital twin of an SDN data-center fabric from real controller state, enabling production-safe
+pre-deployment validation and failure prediction.
+Developed a telemetry-driven fault intelligence system that maps hardware health signals to automated multi-tier corrective
+actions.
+Designed behavioral workload identification from traffic patterns, separating AI training from conventional workloads without
+self-reported identity.
+PROJECTS
+Sandboxed Code-Execution Agent  |  LLM Agents Apr 2026 - May 2026
+Tech: Python, LangGraph, LangChain, Docker, Playwright, Ollama
+Built a LangGraph agent that runs code in an isolated Docker sandbox, with tools for shell, Python execution, file I/O, HTTP
+requests and Playwright browser automation.
+Added a provider-agnostic LLM layer (Anthropic or local Ollama) and sub-agent workers; covered the tools with a 14-case test
+suite.
+CodeAct Fine-tuning with Execution Feedback  |  LLM Fine-tuning Nov 2025
+Tech: Python, MLX, Hugging Face, Qwen2
+Fine-tuned Qwen2-0.5B with MLX to emit executable Python actions (CodeAct style) and built an interactive loop that runs the
+code and feeds results back to the model.
+Scripted dataset generation with execution feedback and a Hugging Face publishing step.
+Live Debugging Partner  |  Interaction Simulation Oct 2026
+Tech: Python, discrete-event simulation, unittest, bootstrap statistics
+Built a Python discrete-event simulator comparing four text and voice interaction channels for a debugging agent over 5
+scripted sessions (1,200 runs, bootstrap intervals).
+Designed an action ledger that decides whether to stop, hold or undo agent work when the user interrupts; it wasted 18.7 s less
+work than always-stop in the simulation.
+Covered the engine with 34 unit tests, including hand-counted timelines and trap policies that must fail.
+VisionDev  |  Computer Vision Jan 2026 - May 2026
+Tech: Python, PyTorch Lightning, scikit-learn, LangChain, vLLM, Qwen2.5-VL
+Built a PyTorch Lightning callback pipeline that logs CIFAR-10 misclassifications and clusters them by distortion type (blur,
+JPEG, pixelation, noise); blur caused 40% of failures.
+Used a vLLM-served Qwen2.5-VL model through LangChain to turn failure clusters into diagnostic reports with architecture
+and augmentation recommendations.
+POSITION OF RESPONSIBILITY
+Teaching Assistant, Artificial Intelligence, BITS Pilani Aug 2026 - Present
+Mentored 99+ students building a multimodal agricultural knowledge base; defined data-curation pipelines, quality benchmarks
+and feature-extraction standards across vision, text and spatial data.
+CERTIFICATIONS
+AWS Academy Graduate - Cloud Architecting, Amazon Web Services (AWS)
+Containers & Kubernetes Essentials, IBM
+AWS Academy Graduate - Cloud Foundations - Training, Amazon Web Services (AWS)

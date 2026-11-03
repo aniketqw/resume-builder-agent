@@ -1,0 +1,165 @@
+# Role definitions drive both resume targeting and ATS scoring.
+#
+# `keywords` are what an ATS actually matches on. `weight` lets a role say that
+# some terms matter more than others: a LangGraph agent role cares far more
+# about "langgraph" than about "python", even though both are real signals.
+# `required_sections` and `target_words` encode layout conventions, which are
+# worth points because real screeners and parsers both depend on them.
+
+defaults:
+  required_sections: [summary, experience, projects, skills, education]
+  target_words: [450, 850]
+  action_verbs:
+    - built, designed, implemented, shipped, led, architected, automated
+    - migrated, optimised, optimized, reduced, scaled, deployed, instrumented
+    - debugged, refactored, integrated, benchmarked, evaluated, profiled
+    - developed, created, engineered, delivered, launched, maintained
+    # Added after a real resume was checked against this list: every one of
+    # these opened a genuine bullet and was wrongly reported as a weak opener.
+    - wrote, added, used, split, containerised, containerized, mentored
+    - measured, analysed, analyzed, trained, fine-tuned, extended, ported
+    - parallelised, parallelized, cached, verified, validated, documented
+
+roles:
+  ai_llm_agent_engineer:
+    title: AI / LLM Agent Engineer
+    headline: Builds agentic LLM systems with evaluation and guardrails
+    keywords:
+      langgraph: 3.0
+      langchain: 2.5
+      agent: 2.5
+      mcp: 2.5
+      rag: 2.0
+      retrieval: 1.5
+      llm: 2.0
+      prompt: 1.5
+      evaluation: 2.0
+      eval: 1.5
+      groq: 1.0
+      openai: 1.0
+      anthropic: 1.0
+      ollama: 1.0
+      embedding: 1.5
+      vector: 1.5
+      tool-calling: 2.0
+      structured-output: 1.5
+      hallucination: 1.5
+      guardrail: 1.5
+      observability: 1.5
+      langsmith: 1.5
+      python: 1.0
+      async: 1.0
+      pydantic: 1.0
+      fastapi: 1.0
+
+  ml_engineer:
+    title: Machine Learning Engineer
+    headline: Trains, evaluates and ships models
+    keywords:
+      pytorch: 3.0
+      tensorflow: 2.5
+      model: 2.0
+      training: 2.5
+      fine-tuning: 2.5
+      inference: 2.0
+      dataset: 2.0
+      benchmark: 2.0
+      accuracy: 1.5
+      evaluation: 2.0
+      opencv: 2.0
+      cnn: 1.5
+      transformer: 2.0
+      bert: 1.5
+      forecasting: 2.0
+      "time series": 2.0
+      computer-vision: 2.5
+      nlp: 2.0
+      numpy: 1.0
+      pandas: 1.0
+      "scikit-learn": 1.5
+      jupyter: 1.0
+      mlops: 2.0
+      python: 1.0
+
+  backend_platform_engineer:
+    title: Backend / Platform Engineer
+    headline: Builds and operates services and infrastructure
+    keywords:
+      api: 2.5
+      rest: 2.0
+      microservice: 2.5
+      docker: 2.5
+      kubernetes: 2.5
+      ci/cd: 2.0
+      postgres: 2.0
+      mongodb: 2.0
+      redis: 1.5
+      kafka: 2.5
+      queue: 1.5
+      websocket: 1.5
+      authentication: 1.5
+      scalability: 1.5
+      latency: 2.0
+      throughput: 2.0
+      monitoring: 2.0
+      spring: 2.0
+      fastapi: 2.0
+      express: 1.5
+      go: 1.5
+      java: 1.5
+      python: 1.0
+      sql: 1.5
+      caching: 1.5
+
+  data_scientist:
+    title: Data Scientist
+    headline: Turns data into measured answers
+    keywords:
+      analysis: 2.5
+      statistics: 2.5
+      regression: 2.5
+      visualisation: 2.0
+      visualization: 2.0
+      pandas: 2.5
+      numpy: 2.0
+      jupyter: 2.0
+      notebook: 1.5
+      hypothesis: 2.0
+      "a/b": 2.0
+      correlation: 1.5
+      dataset: 2.0
+      feature: 1.5
+      clustering: 2.0
+      classification: 2.0
+      matplotlib: 1.5
+      seaborn: 1.5
+      sql: 2.0
+      experiment: 2.0
+      metric: 1.5
+      python: 1.0
+      r: 1.0
+
+  balanced:
+    title: Software Engineer
+    headline: Generalist engineer across services, data and ML
+    keywords:
+      python: 2.0
+      javascript: 1.5
+      api: 2.0
+      docker: 2.0
+      testing: 2.5
+      ci/cd: 2.0
+      git: 1.0
+      sql: 1.5
+      design: 1.5
+      architecture: 2.0
+      debugging: 2.0
+      performance: 1.5
+      documentation: 1.5
+      agent: 1.5
+      llm: 1.5
+      "machine learning": 1.5
+      backend: 1.5
+      frontend: 1.0
+      database: 1.5
+      automation: 1.5

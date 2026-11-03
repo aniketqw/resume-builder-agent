@@ -1,0 +1,53 @@
+/* Design tokens.
+ *
+ * Three theme states, which is why each colour is declared three times:
+ *   - no [data-theme]            -> follow the OS via prefers-color-scheme
+ *   - [data-theme="light"]       -> forced light, must beat the media query
+ *   - [data-theme="dark"]        -> forced dark
+ * Every colour has its definition on bare :root first, so nothing is left
+ * undefined when neither branch applies.
+ *
+ * The --paper* tokens are deliberately NOT redefined for dark mode. Paper is
+ * paper: the preview shows what will be printed, and a dark resume would be a
+ * lie about the PDF.
+ */
+:root{
+  --bg:#f2f4f7; --surface:#ffffff; --surface2:#e9edf2;
+  --ink:#14181f; --muted:#5a6573; --line:#d5dbe3;
+  --accent:#1f56c4; --accent-ink:#ffffff; --accent-soft:#dfe8fb;
+  --good:#17803f; --good-soft:#dcf3e4;
+  --warn:#9a5b00; --warn-soft:#fdeccb;
+  --bad:#b3261e;  --bad-soft:#fbdedb;
+
+  --paper:#ffffff; --paper-ink:#1b1f24; --paper-muted:#4b5563; --paper-line:#c9ced6;
+
+  --ui:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --mono:'IBM Plex Mono',ui-monospace,Menlo,monospace;
+  --doc:'Source Sans 3','IBM Plex Sans',Arial,sans-serif;
+
+  --r-lg:8px; --r-md:6px; --r-sm:4px; --r-xs:3px; --r-pill:999px;
+  --gap:14px;
+  color-scheme:light;
+}
+
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0f1318; --surface:#181d24; --surface2:#222932;
+    --ink:#e8ecf2; --muted:#9aa6b5; --line:#2e3744;
+    --accent:#6f9bff; --accent-ink:#0b1220; --accent-soft:#1c2b4d;
+    --good:#5fd08a; --good-soft:#163524;
+    --warn:#f1b24a; --warn-soft:#3b2c0f;
+    --bad:#ff8a80;  --bad-soft:#40201d;
+    color-scheme:dark;
+  }
+}
+
+:root[data-theme="dark"]{
+  --bg:#0f1318; --surface:#181d24; --surface2:#222932;
+  --ink:#e8ecf2; --muted:#9aa6b5; --line:#2e3744;
+  --accent:#6f9bff; --accent-ink:#0b1220; --accent-soft:#1c2b4d;
+  --good:#5fd08a; --good-soft:#163524;
+  --warn:#f1b24a; --warn-soft:#3b2c0f;
+  --bad:#ff8a80;  --bad-soft:#40201d;
+  color-scheme:dark;
+}
