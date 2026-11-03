@@ -48,7 +48,11 @@ build-backend = "hatchling.build"
 packages = ["src/rba"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+# "." as well as "src": tests/test_merge.py imports `app`, which lives at the
+# project root. Under `python -m pytest` the cwd is on sys.path and it
+# resolved by luck; under the `pytest` console script -- which is how CI
+# invokes it -- it did not, so that test had been failing on main.
+pythonpath = ["src", "."]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = "-q"
