@@ -1,9 +1,16 @@
-"""Unstyled text: the format an applicant tracking system parses most reliably.
+"""Unstyled text: the format least likely to be mangled on the way in.
 
-No tables, no columns, no glyph bullets -- every one of those is a known way to
-confuse a parser. Headings are uppercase on their own line and every bullet
-starts with a hyphen, which is the shape the research consistently finds
-survives extraction.
+No tables, no columns, no glyph bullets. Headings are uppercase on their own
+line and every bullet starts with a hyphen.
+
+Stated honestly, because it is easy to overclaim here: this is a *deterministic*
+property, not a measured one. Plain ASCII with one item per line has nothing for
+a text extractor to reorder, drop or interleave -- which is the actual argument.
+What published evidence exists is about parsing accuracy on the *extractor*
+side, not about hyphens: a layout-aware pipeline lifts resume-parsing F1 from
+0.919 to 0.959 (arXiv 2510.09722, Table 2). The widely-repeated advice about
+ATS-friendly formatting is largely vendor guidance rather than studies -- see
+`docs/literature-survey.md` section 2.2.
 """
 from __future__ import annotations
 
