@@ -1,0 +1,83 @@
+[project]
+name = "rba-v2"
+version = "2.0.0"
+description = "Evidence-grounded resume builder, v2: FastAPI + a browser workbench over the same scorers"
+requires-python = ">=3.11"
+dependencies = [
+  "langgraph>=1.2.18",
+  "langgraph-checkpoint-sqlite>=3.1.2",
+  "langchain-groq>=1.1.3",
+  "langchain-core>=1.4.0",
+  "langsmith>=0.14.14",
+  "pydantic>=2.7",
+  "httpx>=0.27",
+  "tenacity>=9.0",
+  "typer>=0.12",
+  "rich>=13.7",
+  "pyyaml>=6.0",
+  "python-dotenv>=1.0",
+  "aiosqlite>=0.20",
+  # Scoring core. numpy and rank-bm25 are pure/portable; onnxruntime runs the
+  # embedding model WITHOUT torch -- sentence-transformers would pull ~1GB.
+  "numpy>=1.26",
+  "rank-bm25>=0.2.2",
+  "onnxruntime>=1.17",
+  "tokenizers>=0.15",
+  # ats/dense.py imports this directly to fetch the ONNX model. In v1 it was
+  # never declared and arrived transitively -- and because dense.load() catches
+  # every exception and returns None, losing it would have silently dropped the
+  # 0.5-weighted dense channel and shifted every score with no error at all.
+  "huggingface_hub>=0.23",
+  # MCP is the default GitHub backend, not an optional extra.
+  "langchain[mcp]>=1.0",
+  "pypdf>=6.21.4",
+  "fpdf2>=2.8.9",
+  # The web layer. v1 served Streamlit; v2 serves its own API and a static SPA,
+  # so streamlit is deliberately absent.
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "python-multipart>=0.0.9",
+  "sse-starlette>=2.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "ruff>=0.6"]
+
+[project.scripts]
+rba = "rba.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/rba", "src/rba_api"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-q"
+markers = [
+  "slow: touches the embedding model; timing-sensitive",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "RUF"]
+ignore = [
+  "E501",    # long lines are handled by the formatter, not an error
+  "B008",    # typer and fastapi both use call-expressions in defaults by design
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["rba", "rba_api", "fakes"]
+
+[tool.ruff.lint.per-file-ignores]
+# `doctor` is a diagnostic: it must report any provider failure, not raise.
+"src/rba/cli.py" = ["BLE001"]
+# importorskip must run before the modules it guards are imported.
+"tests/*" = ["RUF059", "E402"]
