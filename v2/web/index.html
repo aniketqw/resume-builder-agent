@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Resume Simulator</title>
+<link rel="stylesheet" href="/css/tokens.css">
+<link rel="stylesheet" href="/css/base.css">
+<link rel="stylesheet" href="/css/layout.css">
+<link rel="stylesheet" href="/css/controls.css">
+<link rel="stylesheet" href="/css/paper.css">
+<link rel="stylesheet" href="/css/panels.css">
+<link rel="modulepreload" href="/js/store.js">
+<link rel="modulepreload" href="/js/dom.js">
+<link rel="modulepreload" href="/js/api.js">
+<link rel="modulepreload" href="/js/render.js">
+<link rel="modulepreload" href="/js/events.js">
+<link rel="modulepreload" href="/js/actions.js">
+<link rel="modulepreload" href="/js/scoreclient.js">
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div>
+      <h1>Resume Simulator</h1>
+      <p class="sub">Your resume is the baseline and is never rewritten.
+      Every number below is measured, not estimated — and anything that cannot
+      be traced to evidence is left as a blank for you to fill.</p>
+    </div>
+    <div class="row">
+      <button class="btn" id="themeBtn" type="button">Theme</button>
+    </div>
+  </div>
+  <div class="tabs" role="tablist" id="tabs"></div>
+  <div id="view"></div>
+</div>
+<div id="toast" role="status" aria-live="polite"></div>
+<script type="module" src="/js/main.js"></script>
+</body>
+</html>

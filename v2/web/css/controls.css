@@ -1,0 +1,113 @@
+/* Buttons, chips, segmented controls, meters, pills.
+ * Every meter here is CSS. There is no chart library and there does not need
+ * to be one: these are bars and dots. */
+
+.btn{
+  background:var(--surface);color:var(--ink);
+  border:1px solid var(--line);border-radius:var(--r-md);
+  padding:6px 11px;font:600 12px var(--ui);cursor:pointer;
+}
+.btn:hover:not(:disabled){border-color:var(--accent)}
+.btn.pri{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.btn:disabled{opacity:.55;cursor:not-allowed}
+
+.chip{
+  background:var(--surface);color:var(--ink);
+  border:1px solid var(--line);border-radius:var(--r-pill);
+  padding:5px 12px;font:500 13px var(--ui);cursor:pointer;
+}
+.chip[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+
+/* Segmented control. Each option carries its own measured delta underneath,
+ * which is the whole point of the control. */
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden}
+.seg button{
+  background:var(--surface);color:var(--ink);border:0;border-right:1px solid var(--line);
+  padding:5px 10px;font:600 12px var(--ui);cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;gap:1px;min-width:62px;
+}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+.seg button small{font:400 11px var(--mono);opacity:.85}
+
+/* Delta cells. Fixed width so a value landing never reflows the row, and the
+ * three states differ only by glyph and opacity -- see js/scoreclient.js. */
+[data-delta]{
+  min-width:3.8ch;display:inline-block;text-align:right;
+  font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:11px;
+}
+[data-delta].dz{color:var(--muted);opacity:.45}
+[data-delta].stale{opacity:.45}
+[data-delta].inflight{opacity:.45;animation:rba-pulse 1.2s ease-in-out infinite}
+[data-delta].up{color:var(--good)}
+[data-delta].down{color:var(--bad)}
+@keyframes rba-pulse{0%,100%{opacity:.25}50%{opacity:.6}}
+
+/* Headline number */
+.big{font:600 52px/1 var(--mono);letter-spacing:-.03em}
+.big small{font:400 18px var(--ui);color:var(--muted);letter-spacing:0}
+
+/* 0-100 rail with markers */
+.track{position:relative;height:30px;margin:10px 0 6px}
+.track .rail{position:absolute;inset:12px 0 auto 0;height:6px;background:var(--surface2);border-radius:var(--r-xs)}
+.track .fill{position:absolute;inset:12px auto auto 0;height:6px;background:var(--accent);border-radius:var(--r-xs);transition:width .2s}
+.track .mk{position:absolute;top:6px;height:18px;border-left:1px dashed var(--muted)}
+.track .mk span{position:absolute;top:-10px;left:2px;font-size:10px;color:var(--muted);white-space:nowrap}
+.track .mk.hi span{top:18px}
+
+/* Channel bars -- three, not seven. See css comment in method tab. */
+.parts{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-top:10px}
+.part{font-size:12px}
+.part .bar{height:4px;background:var(--surface2);border-radius:2px;margin-top:4px;overflow:hidden}
+.part .bar i{display:block;height:100%;background:var(--accent)}
+.part .lbl{display:flex;justify-content:space-between;gap:6px;color:var(--muted)}
+
+/* Keyword coverage, straight from diagnostics.keyword_coverage() */
+.pills{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.pill{font:400 11px var(--mono);padding:2px 7px;border-radius:var(--r-sm)}
+.pill.hit{background:var(--good-soft);color:var(--good)}
+.pill.half{background:var(--warn-soft);color:var(--warn)}
+.pill.miss{background:var(--bad-soft);color:var(--bad)}
+
+.tag{font-size:12px;padding:2px 7px;border-radius:var(--r-sm)}
+.tag.g{background:var(--good-soft);color:var(--good)}
+.tag.w{background:var(--warn-soft);color:var(--warn)}
+.tag.b{background:var(--bad-soft);color:var(--bad)}
+
+/* Four-dot fit meter */
+.rel{display:inline-flex;gap:3px;vertical-align:middle}
+.rel i{width:7px;height:7px;border-radius:50%;background:var(--surface2)}
+.rel i.on{background:var(--accent)}
+
+.callout{
+  border-left:3px solid var(--accent);background:var(--accent-soft);
+  border-radius:0 var(--r-md) var(--r-md) 0;padding:10px 12px;margin:8px 0;
+}
+.callout.w{border-left-color:var(--warn);background:var(--warn-soft)}
+.callout.b{border-left-color:var(--bad);background:var(--bad-soft)}
+
+.tbl{border-collapse:collapse;width:100%;font-size:12.5px}
+.tbl th{
+  text-align:left;font:600 11px var(--ui);text-transform:uppercase;
+  letter-spacing:.06em;color:var(--muted);padding:6px 8px;
+  border-bottom:1px solid var(--line);
+}
+.tbl td{padding:6px 8px;border-bottom:1px solid var(--line)}
+.tbl td.num{font-family:var(--mono);text-align:right;font-variant-numeric:tabular-nums}
+
+input[type=text],input[type=search],textarea,select{
+  background:var(--surface);color:var(--ink);
+  border:1px solid var(--line);border-radius:var(--r-md);
+  padding:6px 8px;font:400 13px var(--ui);width:100%;
+}
+textarea{resize:vertical;min-height:70px}
+label.chk{display:flex;gap:7px;align-items:flex-start;font-size:13px;cursor:pointer}
+
+#toast{
+  position:fixed;left:50%;transform:translateX(-50%);
+  bottom:max(18px,env(safe-area-inset-bottom,0px));
+  background:var(--ink);color:var(--bg);
+  padding:9px 14px;border-radius:var(--r-md);font-size:13px;
+  opacity:0;pointer-events:none;transition:opacity .2s;z-index:50;max-width:min(92vw,560px);
+}
+#toast.show{opacity:1}
