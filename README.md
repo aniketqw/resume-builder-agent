@@ -106,6 +106,56 @@ unrelated evidence — stripping true statements and keeping false ones.
 
 ---
 
+## What has actually been measured
+
+Numbers worth stating are stated with their source, the same discipline the tool
+applies to claims it makes about your repositories.
+
+**Generation quality** — `v1/evals/results/latest.json`, over a 6-repository
+golden set chosen to span the hard cases:
+
+| | |
+|---|---|
+| Faithfulness (RAGAS-style, supported atomic claims / total) | **0.9184** |
+| Number precision (deterministic, no model) | **1.00** |
+| Claims | 39 total — 36 verified, 2 rejected, 1 needs measuring |
+
+This measures whether generated lines are faithful to repository evidence. It is
+**not** a measure of match quality; there is no retrieval or ranking evaluation
+in this repository, and the [literature survey](docs/literature-survey.md) says
+so plainly.
+
+**Cost** — `v1/evals/budget.md`: one request and ~3,000 tokens per repository; a
+warm re-run of ten repositories cost **0 requests and 0 tokens**, against 30,587
+tokens cold.
+
+**Speed** — exact leave-one-out attribution over a real résumé went from
+**4.9 s to 0.37 s with bit-identical output**, by exploiting the embedding
+model's 512-token cut to collapse 16 candidate documents into 4 forward passes.
+`v2/tests/test_batch.py` asserts the batched path equals the unbatched one to
+float equality.
+
+### Where the design comes from
+
+The scoring method is not invented here. [`docs/literature-survey.md`](docs/literature-survey.md)
+covers the whole pipeline — parsing, matching, generation, evaluation — with
+section-level citations, an inventory of what this project implements, and an
+honest list of what it does not. The short version:
+
+- Convex combination rather than Reciprocal Rank Fusion, on Bruch et al.
+  (TOIS 2023, Table 2) — a weighted sum beat RRF on every dataset they tried.
+- Hybrid rather than dense-only, because BEIR (§5) finds dense retrievers
+  "perform significantly worse than BM25" on many datasets zero-shot — and a
+  résumé/posting pair is zero-shot by construction.
+- Faithfulness measured as supported-claims-over-total, following RAGAS (§3) and
+  FActScore's atomic decomposition (§3.1).
+
+The survey also names the largest known gap: the dense channel reads at most 512
+tokens while a one-page résumé is about 1,150, so roughly its back half does not
+reach the heaviest-weighted channel.
+
+---
+
 ## Running v1
 
 ```bash
