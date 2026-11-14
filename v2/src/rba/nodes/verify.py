@@ -25,7 +25,8 @@ from __future__ import annotations
 import logging
 import re
 
-from ..state import AgentState, Claim, ClaimStatus
+from ..repobrain import RepoBrain, symbol_at_line
+from ..state import AgentState, Claim, ClaimStatus, RepoFacts
 
 log = logging.getLogger(__name__)
 
@@ -166,7 +167,46 @@ def quote_relevant(claim_text: str, quote: str, path: str = "",
     return len(shared) >= min_shared
 
 
-def verify_claim(claim: Claim, evidence: str) -> Claim:
+def _known_path(path: str, facts: RepoFacts | None) -> bool:
+    """Is this a real location in the pinned snapshot, or something the
+    model invented? `path` is written by the model and was never checked
+    against anything before this -- a claim about "tcell" once cited a real
+    line from go.mod this way, because presence of the quote alone does not
+    mean the path naming it is real."""
+    if facts is None:
+        return True  # nothing to check against; do not invent a rejection
+    if path.startswith(("commit:", "api:")):
+        return True
+    return path in facts.tree or path == facts.readme_path or path in facts.source_files
+
+
+def _locate(path: str, quote: str, facts: RepoFacts | None,
+           brain: RepoBrain | None) -> tuple[int, int]:
+    """Where in the pinned source this quote actually is, as a line range.
+
+    Deterministic lookup only -- the model is never asked for line numbers,
+    because asking it to report its own citation's location is exactly the
+    kind of self-attestation this project exists to replace with a check.
+    Returns (0, 0) when the quote cannot be located (e.g. it is from the
+    README, which is not source-indexed).
+    """
+    if facts is None or not path or path not in facts.source_files:
+        return 0, 0
+    source = facts.source_files[path]
+    idx = source.find(quote)
+    if idx < 0:
+        return 0, 0
+    line = source.count("\n", 0, idx) + 1
+    if brain is not None:
+        sym = symbol_at_line(brain, path, line)
+        if sym is not None:
+            return sym.line_start, sym.line_end
+    return line, line
+
+
+def verify_claim(claim: Claim, evidence: str, *,
+                 facts: RepoFacts | None = None,
+                 brain: RepoBrain | None = None) -> Claim:
     """Decide a single claim's status. Pure function, fully testable."""
     unsupported_numbers = [n for n in numbers_in(claim.text)
                            if not _number_supported(n, evidence)]
@@ -189,7 +229,13 @@ def verify_claim(claim: Claim, evidence: str) -> Claim:
         claim.reason = "no evidence supplied"
         return claim
 
-    present = [e for e in claim.evidence if quote_supported(e.quote, evidence)]
+    real_path = [e for e in claim.evidence if _known_path(e.path, facts)]
+    if not real_path:
+        claim.status = ClaimStatus.REJECTED
+        claim.reason = "cited path does not exist in the pinned repository snapshot"
+        return claim
+
+    present = [e for e in real_path if quote_supported(e.quote, evidence)]
     if not present:
         claim.status = ClaimStatus.REJECTED
         claim.reason = "every supporting quote is absent from the evidence"
@@ -201,6 +247,15 @@ def verify_claim(claim: Claim, evidence: str) -> Claim:
         claim.reason = ("supporting quote is real but does not mention anything "
                         "in the claim")
         return claim
+
+    # Everything from here is a fact the pipeline establishes, not something
+    # the model asserted about its own citation.
+    repo = facts.repo if facts else claim.repo
+    sha = facts.head_sha if facts else ""
+    for e in good:
+        e.repo = repo
+        e.sha = sha
+        e.line_start, e.line_end = _locate(e.path, e.quote, facts, brain)
     claim.evidence = good
 
     claim.status = ClaimStatus.VERIFIED
@@ -249,12 +304,16 @@ def _measure_hint(text: str) -> str:
 async def verify_claims(state: AgentState) -> AgentState:
     summaries = state.get("summaries") or {}
     evidence_texts = state.get("evidence_texts") or {}
+    facts = state.get("facts") or {}
+    repo_graph = state.get("repo_graph") or {}
     verified: list[Claim] = []
 
     dropped_tech: list[str] = []
     for name, summary in summaries.items():
         evidence = evidence_texts.get(name, "")
-        checked = [verify_claim(c, evidence) for c in summary.claims]
+        checked = [verify_claim(c, evidence, facts=facts.get(name),
+                                brain=repo_graph.get(name))
+                  for c in summary.claims]
         summary.claims = checked
         summary.tech, unsupported = filter_tech(summary.tech, evidence)
         dropped_tech += [f"{name}:{t}" for t in unsupported]

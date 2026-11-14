@@ -14,6 +14,7 @@ Two non-obvious behaviours this wraps, both found by probing the live API:
 """
 from __future__ import annotations
 
+import datetime
 import json
 import logging
 import os
@@ -147,6 +148,7 @@ class GroqClient:
                        tier: str | None = None, model: str | None = None,
                        schema: type[BaseModel] | None = None,
                        cache_key: str | None = None, **overrides) -> Result:
+        start_time = datetime.datetime.now(datetime.UTC)
         if model is None:
             model = self.config.model_for_tier(tier) if tier else self.config.model_for_node(node or "")
         body = self._build(model, messages, schema, **overrides)
@@ -156,7 +158,12 @@ class GroqClient:
             if hit is not None:
                 usage = Usage(cached=True)
                 self._record(node, usage)
-                return Result(hit, model, usage, {"cached": True})
+                result = Result(hit, model, usage, {"cached": True})
+                # A cache hit still used a graph node's trace slot; recording
+                # it as a zero-token run keeps LangSmith's accounting honest
+                # instead of making the request look like it never happened.
+                self._trace(node, model, messages, result, start_time=start_time)
+                return result
 
         prompt_text = "".join(m.get("content", "") for m in messages)
         est = estimate_tokens(prompt_text, self.margin) + int(body["max_tokens"] * 0.5)
@@ -236,7 +243,7 @@ class GroqClient:
             result = Result(content, model, usage, data)
             if cache_key and self.cache:
                 self.cache.put(cache_key, model, content)
-            self._trace(node, model, messages, result)
+            self._trace(node, model, messages, result, start_time=start_time)
             return result
 
         raise last_exc or GroqError(f"exhausted {self.max_retries} attempts on {model}")
@@ -268,20 +275,50 @@ class GroqClient:
         raise GroqError(f"schema validation failed after retry: {last}")
 
     def _trace(self, node: str | None, model: str,
-               messages: list[dict[str, str]], result: Result) -> None:
+               messages: list[dict[str, str]], result: Result,
+               start_time: datetime.datetime | None = None) -> None:
+        """Record this completion in LangSmith, nested under the active
+        graph-node run when one is in progress.
+
+        Before this, every call was `self._tracer.create_run(...)` with no
+        `parent_run_id` -- LangGraph already propagates a run-tree context
+        into each node's execution (it wraps every node as a traced
+        runnable once `LANGCHAIN_TRACING_V2` is set), so a flat `create_run`
+        produced a disconnected root next to that tree instead of a child of
+        it. `get_current_run_tree()` is how to find that in-progress parent
+        and attach to it; outside of a traced call (e.g. a unit test that
+        constructs `GroqClient` directly) there is no parent, and this falls
+        back to a root run rather than silently dropping the trace.
+        """
         if self._tracer is None:
             return
         try:
-            self._tracer.create_run(
-                name=node or "groq",
-                run_type="llm",
-                inputs={"messages": messages, "model": model},
-                outputs={"content": result.content,
-                         "usage": {"prompt": result.usage.prompt_tokens,
-                                   "completion": result.usage.completion_tokens,
-                                   "total": result.usage.total_tokens}},
-                project_name=os.environ.get("LANGSMITH_PROJECT"),
-            )
+            from langsmith.run_helpers import get_current_run_tree
+
+            now = datetime.datetime.now(datetime.UTC)
+            inputs = {"messages": messages, "model": model}
+            outputs = {"content": result.content,
+                      "usage": {"prompt": result.usage.prompt_tokens,
+                                "completion": result.usage.completion_tokens,
+                                "total": result.usage.total_tokens,
+                                "cached": result.usage.cached}}
+            parent = get_current_run_tree()
+            if parent is not None:
+                child = parent.create_child(name=node or "groq", run_type="llm",
+                                            inputs=inputs, start_time=start_time or now)
+                child.post()
+                child.end(outputs=outputs, end_time=now)
+                child.patch()
+            else:
+                self._tracer.create_run(
+                    name=node or "groq",
+                    run_type="llm",
+                    inputs=inputs,
+                    outputs=outputs,
+                    start_time=start_time or now,
+                    end_time=now,
+                    project_name=os.environ.get("LANGSMITH_PROJECT"),
+                )
         except Exception as exc:  # tracing must never break a run
             log.debug("langsmith trace failed: %s", exc)
 

@@ -164,6 +164,42 @@ def test_an_unknown_session_is_404(client):
                        json={"username": "octocat"}).status_code == 404
 
 
+def test_imports_sharing_a_groq_key_share_the_same_limiter(monkeypatch):
+    """`AppState.limiter_for` used to be dead code: `GroqClient.__init__`
+    defaults to `limiter or Limiter(config)`, so an import that never passed
+    `limiter=` got a private one believing it owned the whole 8,000 TPM
+    budget. Two imports with the same effective Groq key must now share the
+    actual `Limiter` object `routes/github.py` passes through."""
+    seen_limiters = []
+    seen_caches = []
+    seen_resume_text = []
+
+    async def fake_build(username, **kwargs):
+        seen_limiters.append(kwargs.get("limiter"))
+        seen_caches.append(kwargs.get("cache"))
+        seen_resume_text.append(kwargs.get("resume_text"))
+        return fake_result()
+
+    monkeypatch.setattr("rba_api.routes.github.build_from_github", fake_build)
+    with TestClient(create_app(testing=True)) as c:
+        s1 = c.post("/api/upload", files={"file": ("r.txt", RESUME, "text/plain")}
+                    ).json()["session_id"]
+        s2 = c.post("/api/upload", files={"file": ("r.txt", RESUME, "text/plain")}
+                    ).json()["session_id"]
+        _run(c, s1, groq_key="shared-key")
+        _run(c, s2, groq_key="shared-key")
+
+    assert len(seen_limiters) == 2
+    assert seen_limiters[0] is not None
+    assert seen_limiters[0] is seen_limiters[1], \
+        "same effective key must reuse one Limiter, not one per import"
+    # The app-scoped cache is likewise shared, not a fresh Cache() per import.
+    assert seen_caches[0] is seen_caches[1]
+    # The uploaded resume's text reaches the pipeline for resume-aware
+    # selection, rather than being silently unavailable.
+    assert all(seen_resume_text), "resume_text must reach build_from_github"
+
+
 def test_a_failing_import_reports_why_without_leaking_the_key(client, session,
                                                               monkeypatch):
     from fakes import fake_secret

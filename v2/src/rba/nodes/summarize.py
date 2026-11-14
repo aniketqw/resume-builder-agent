@@ -21,11 +21,22 @@ from ..cache import make_key
 from ..config import Config
 from ..groq_client import GroqClient
 from ..prompts import render
+from ..repobrain import RepoBrain
 from ..state import AgentState, Claim, ClaimStatus, Evidence, RepoFacts, RepoSummary
 
 log = logging.getLogger(__name__)
 
 PROMPT = "summarize.v2"
+
+#: Structure budget: enough for the model to cite something real without
+#: turning the evidence bundle into a code dump. Kept well under the ~3,000
+#: tokens/repo benchmark alongside the README and signals.
+_MAX_STRUCT_FILES = 3
+_MAX_DEFS_PER_FILE = 6
+_MAX_CALLS = 12
+_MAX_ROUTES = 8
+_MAX_EXCERPTS = 2
+_EXCERPT_CHARS = 300
 
 
 class _Evidence(BaseModel):
@@ -50,7 +61,54 @@ class _Summary(BaseModel):
         description="If the evidence is too thin to summarize, why. Else empty.")
 
 
-def build_evidence(facts: RepoFacts, max_chars: int = 7000) -> str:
+def _code_structure(facts: RepoFacts, brain: RepoBrain) -> dict | None:
+    """A compact view of real code structure: defs with line ranges, call
+    edges, route registrations, and a couple of short excerpts -- all
+    something the summarizer can actually cite, unlike a bare file path.
+    Returns None when there is nothing indexed (no source was fetched, or
+    none of it parsed)."""
+    if not brain.files:
+        return None
+    ranked = sorted(brain.files.items(), key=lambda kv: -len(kv[1].symbols))[:_MAX_STRUCT_FILES]
+    defs: dict[str, list[dict]] = {}
+    calls: list = []
+    routes: list = []
+    for path, idx in ranked:
+        if idx.symbols:
+            defs[path] = [{"name": s.name, "kind": s.kind,
+                          "lines": f"{s.line_start}-{s.line_end}"}
+                         for s in idx.symbols[:_MAX_DEFS_PER_FILE]]
+        calls.extend(idx.calls)
+        routes.extend(idx.routes)
+    if not defs:
+        return None
+
+    out: dict[str, object] = {"defs": defs}
+    if calls:
+        out["calls"] = [f"{c.caller.rsplit('::', 1)[-1]}->{c.callee}"
+                        for c in calls[:_MAX_CALLS]]
+    if routes:
+        out["routes"] = [f"{r.method} {r.pattern} -> {r.handler.rsplit('::', 1)[-1]}"
+                         for r in routes[:_MAX_ROUTES]]
+
+    biggest = sorted((s for _, idx in ranked for s in idx.symbols),
+                     key=lambda s: -(s.line_end - s.line_start))[:_MAX_EXCERPTS]
+    excerpts = []
+    for sym in biggest:
+        source = facts.source_files.get(sym.path, "")
+        lines = source.splitlines()
+        snippet = "\n".join(lines[sym.line_start - 1:sym.line_end])[:_EXCERPT_CHARS]
+        if snippet:
+            excerpts.append({"path": sym.path,
+                            "lines": f"{sym.line_start}-{sym.line_end}",
+                            "text": snippet})
+    if excerpts:
+        out["excerpts"] = excerpts
+    return out
+
+
+def build_evidence(facts: RepoFacts, max_chars: int = 7000,
+                   brain: RepoBrain | None = None) -> str:
     """A compact JSON bundle. This exact text is what the verifier checks against."""
     bundle: dict[str, object] = {"repo": facts.repo}
     if facts.readme:
@@ -65,6 +123,10 @@ def build_evidence(facts: RepoFacts, max_chars: int = 7000) -> str:
         bundle["dependencies"] = facts.dependencies
     if facts.languages:
         bundle["languages"] = facts.languages
+    if brain is not None:
+        code = _code_structure(facts, brain)
+        if code:
+            bundle["code"] = code
     bundle["signals"] = {
         "file_count": facts.file_count,
         "commits_sampled": facts.commit_count,
@@ -75,6 +137,12 @@ def build_evidence(facts: RepoFacts, max_chars: int = 7000) -> str:
     text = json.dumps(bundle, indent=1, ensure_ascii=False)
     if len(text) > max_chars:
         # Drop the least information-dense parts first, never the README.
+        # Code structure goes before the raw file list: a citeable def with
+        # a line range is worth more per char than a bare path, but it is
+        # still less essential than the README it supplements.
+        bundle.pop("code", None)
+        text = json.dumps(bundle, indent=1, ensure_ascii=False)
+    if len(text) > max_chars:
         bundle.pop("files", None)
         text = json.dumps(bundle, indent=1, ensure_ascii=False)
         if len(text) > max_chars and isinstance(bundle.get("readme"), dict):
@@ -85,9 +153,10 @@ def build_evidence(facts: RepoFacts, max_chars: int = 7000) -> str:
 
 async def summarize_one(client: GroqClient, facts: RepoFacts,
                         tier: str = "small",
-                        max_evidence_chars: int = 7000) -> tuple[RepoSummary, str]:
+                        max_evidence_chars: int = 7000,
+                        brain: RepoBrain | None = None) -> tuple[RepoSummary, str]:
     """Summarize one repo. Returns the summary and the evidence text used."""
-    evidence = build_evidence(facts, max_evidence_chars)
+    evidence = build_evidence(facts, max_evidence_chars, brain=brain)
     messages, version = render(PROMPT, repo=facts.repo, evidence=evidence)
     key = make_key(facts.repo, facts.head_sha, PROMPT, version)
     obj, _usage = await client.structured(
@@ -123,6 +192,7 @@ async def summarize_repos(state: AgentState, *, client: GroqClient,
     # what the measured 8,000 TPM ceiling allows about four of per minute.
     max_evidence = cfg.get("summarize.max_evidence_chars", 7000)
     facts: dict[str, RepoFacts] = state.get("facts") or {}
+    repo_graph: dict[str, RepoBrain] = state.get("repo_graph") or {}
     tiers = {r.name: (r.tier or "small") for r in state.get("selected", [])}
     sem = asyncio.Semaphore(concurrency)
 
@@ -130,7 +200,8 @@ async def summarize_repos(state: AgentState, *, client: GroqClient,
         async with sem:
             try:
                 summary, evidence = await summarize_one(
-                    client, f, tiers.get(name, "small"), max_evidence)
+                    client, f, tiers.get(name, "small"), max_evidence,
+                    brain=repo_graph.get(name))
                 return name, summary, evidence, None
             except Exception as exc:
                 log.warning("summarize failed for %s: %s", name, exc)

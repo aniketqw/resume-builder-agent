@@ -33,6 +33,15 @@ class Bullet:
     text: str
     source_repo: str = ""
     evidence: str = ""
+    # Where the quote came from: a file path (or "commit:<sha>") and the
+    # commit it was pinned at. Together with GITHUB_PERMALINK_TEMPLATE these
+    # make the quote a clickable, independently checkable fact instead of a
+    # trust-me string. Empty when the claim had no evidence or the repo is
+    # unknown (e.g. a bullet parsed from the user's own resume).
+    evidence_path: str = ""
+    evidence_sha: str = ""
+    evidence_line_start: int = 0
+    evidence_line_end: int = 0
     enabled: bool = True
     # Set by the extraction/verification pipeline. A bullet that failed
     # verification can still be shown, but it is marked, never silently kept.
@@ -50,20 +59,42 @@ class Bullet:
         if not self.id:
             self.id = _bullet_id(self.text, self.source_repo)
 
+    @property
+    def permalink(self) -> str:
+        """A GitHub blob permalink for this bullet's evidence, or "" if any
+        of repo/path/sha is missing. Built only from fields already captured
+        by the pipeline -- nothing here is computed or guessed."""
+        if not (self.source_repo and self.evidence_path and self.evidence_sha):
+            return ""
+        if self.evidence_path.startswith(("commit:", "api:")):
+            return ""
+        base = (f"https://github.com/{self.source_repo}/blob/"
+                f"{self.evidence_sha}/{self.evidence_path}")
+        if not self.evidence_line_start:
+            return base
+        frag = (f"#L{self.evidence_line_start}"
+               if self.evidence_line_start == self.evidence_line_end
+               else f"#L{self.evidence_line_start}-L{self.evidence_line_end}")
+        return base + frag
+
     def to_dict(self) -> dict:
         return {
             "id": self.id, "text": self.text, "source_repo": self.source_repo,
-            "evidence": self.evidence, "enabled": self.enabled,
+            "evidence": self.evidence, "evidence_path": self.evidence_path,
+            "evidence_sha": self.evidence_sha,
+            "evidence_line_start": self.evidence_line_start,
+            "evidence_line_end": self.evidence_line_end, "enabled": self.enabled,
             "verified": self.verified, "measure_hint": self.measure_hint,
-            "origin": self.origin,
+            "origin": self.origin, "permalink": self.permalink,
         }
 
     @classmethod
     def from_dict(cls, payload: dict) -> Bullet:
         return cls(**{k: v for k, v in payload.items()
                       if k in {"id", "text", "source_repo", "evidence",
-                               "enabled", "verified", "measure_hint",
-                               "origin"}})
+                               "evidence_path", "evidence_sha",
+                               "evidence_line_start", "evidence_line_end",
+                               "enabled", "verified", "measure_hint", "origin"}})
 
 
 @dataclass
@@ -384,22 +415,49 @@ def _skill_candidates(text: str) -> list[str]:
 
 
 def from_summaries(summaries, name: str = "", headline: str = "",
-                   contact: str = "", summary: str = "") -> ResumeDoc:
+                   contact: str = "", summary: str = "",
+                   facts: dict | None = None) -> ResumeDoc:
     """Club per-repository summaries into one resume.
 
     One section per project, preserving which repository each bullet came from
-    and whether it survived verification.
+    and whether it survived verification. ``facts`` (``RepoFacts`` keyed by
+    repo, from graph state) supplies the commit SHA each claim's evidence was
+    read at, so a bullet's path + sha make a real, checkable permalink instead
+    of a verbatim quote with nowhere to click.
     """
+    facts = facts or {}
     sections: list[Section] = []
     for repo, repo_summary in (summaries or {}).items():
         bullets: list[Bullet] = []
+        repo_facts = facts.get(repo)
+        head_sha = getattr(repo_facts, "head_sha", "") or ""
         for claim in getattr(repo_summary, "claims", []):
             status = getattr(claim.status, "value", str(claim.status))
             if status == "rejected":
                 continue          # refused claims never enter the document
-            evidence = claim.evidence[0].quote if claim.evidence else ""
+            first = claim.evidence[0] if claim.evidence else None
+            evidence = first.quote if first else ""
+            # `verify_claim` only resolves path/line/sha for claims that
+            # reach VERIFIED -- a `needs_measure` claim returns early with
+            # its evidence untouched, so `first.path` there is still
+            # whatever the model wrote, unvalidated (it can be a key from
+            # the evidence bundle's own JSON, like "files", not a real
+            # path). Building a permalink from that plus the real head_sha
+            # produced a link that *looked* legitimate and pointed nowhere
+            # real -- caught by running a live import, not by a unit test.
+            # Only a verified claim's evidence is trustworthy enough to cite.
+            if status == "verified" and first is not None:
+                evidence_path = first.path
+                sha = getattr(first, "sha", "") or head_sha
+                line_start = getattr(first, "line_start", 0)
+                line_end = getattr(first, "line_end", 0)
+            else:
+                evidence_path = sha = ""
+                line_start = line_end = 0
             bullets.append(Bullet(
                 text=claim.text, source_repo=repo, evidence=evidence,
+                evidence_path=evidence_path, evidence_sha=sha,
+                evidence_line_start=line_start, evidence_line_end=line_end,
                 verified=status == "verified",
                 measure_hint=getattr(claim, "measure_hint", ""),
             ))

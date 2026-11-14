@@ -1,6 +1,7 @@
 import pytest
 
 from fakes import FakeJev
+from rba.ats import dense
 from rba.config import Config
 from rba.jev_client import JevClient
 from rba.nodes.select import (
@@ -9,6 +10,7 @@ from rba.nodes.select import (
     apply_hard_rules,
     drop_empty,
     heuristic_score,
+    score_relevance,
     select_repos,
 )
 from rba.signals import RepoSignals
@@ -152,3 +154,62 @@ def test_heuristic_prefers_substantial_repos():
 @pytest.mark.parametrize("name", ["walmartPrep", "100xDevCohort4", "my-tutorial"])
 def test_heuristic_penalises_obvious_course_names(name):
     assert heuristic_score(repo(name)) < heuristic_score(repo("payments-service"))
+
+
+# -- resume-aware relevance (free: one local ONNX embedding, no LLM) ------
+skip_if_no_dense = pytest.mark.skipif(
+    not dense.available(), reason="embedding model unavailable in this environment")
+
+
+@skip_if_no_dense
+def test_relevant_repo_outranks_an_unrelated_one_at_equal_claimable():
+    fastapi_repo = repo("api-gateway", description="A FastAPI service with retrieval "
+                                                    "and RAG endpoints", language="Python")
+    unrelated_repo = repo("holiday-planner", description="A trip itinerary spreadsheet "
+                                                          "generator", language="Python")
+    fastapi_repo.claimable = unrelated_repo.claimable = 0.6
+    resume = "Experienced building FastAPI microservices and RAG retrieval pipelines."
+    score_relevance([fastapi_repo, unrelated_repo], {}, resume)
+    assert fastapi_repo.relevance > unrelated_repo.relevance
+
+
+@skip_if_no_dense
+def test_empty_resume_text_leaves_relevance_at_zero_and_changes_nothing():
+    r = repo("x")
+    score_relevance([r], {}, "")
+    assert r.relevance == 0.0
+
+
+def test_unavailable_embedding_model_leaves_relevance_at_zero(monkeypatch):
+    """`embed` returning None (model unavailable) must degrade to exactly
+    today's ranking -- not raise, not silently rank by something else."""
+    monkeypatch.setattr("rba.ats.dense.embed", lambda *a, **k: None)
+    r = repo("x")
+    score_relevance([r], {}, "some resume text")
+    assert r.relevance == 0.0
+
+
+async def test_select_repos_reorders_by_resume_relevance_but_respects_the_claimable_floor():
+    """Relevance can reorder who makes the cut, but it must never promote a
+    repo Jev judged below the claimable threshold."""
+    fake = FakeJev({"claimable": {"noul": 0.5}, "tier": {"choice": "small", "confidence": 1.0}})
+    jev = JevClient(Config.load(), api_key="k", transport=fake.transport())
+    unclaimable_jev = FakeJev({"claimable": {"noul": 0.01},
+                              "tier": {"choice": "small", "confidence": 1.0}})
+
+    out = await select_repos(
+        {"repos": [repo("payments-service")], "username": "u",
+         "resume_text": "irrelevant text"},
+        jev=jev)
+    await jev.aclose()
+    # Still selected: claimable alone already clears the default 0.45 floor.
+    assert [r.name for r in out["selected"]] == ["payments-service"]
+
+    jev2 = JevClient(Config.load(), api_key="k", transport=unclaimable_jev.transport())
+    out2 = await select_repos(
+        {"repos": [repo("course-notebook")], "username": "u",
+         "resume_text": "course-notebook course-notebook course-notebook"},
+        jev=jev2)
+    await jev2.aclose()
+    # Even a perfect relevance match cannot rescue a repo Jev scored unclaimable.
+    assert out2["selected"] == []

@@ -112,6 +112,77 @@ def test_rejected_claims_never_enter_the_document():
     assert not needs_measure.verified and needs_measure.measure_hint == "time it"
 
 
+def test_evidence_survives_into_a_checkable_permalink():
+    """A generated bullet must carry enough to prove itself: not just the
+    quote, but the file, commit and line range it was read at. Before this,
+    `from_summaries` kept claim.evidence[0].quote and silently dropped
+    claim.evidence[0].path, so there was nothing to link back to."""
+    from rba.state import Claim, Evidence, RepoFacts, RepoSummary
+
+    summary = RepoSummary(repo="octocat/demo", claims=[
+        Claim(id="a", repo="octocat/demo", text="Ships 34 tests",
+              evidence=[Evidence(path="tests/test_x.py", quote="34 tests",
+                                 repo="octocat/demo", sha="deadbeef",
+                                 line_start=10, line_end=12)]),
+    ])
+    facts = {"octocat/demo": RepoFacts(repo="octocat/demo", head_sha="deadbeef")}
+    doc = from_summaries({"octocat/demo": summary}, facts=facts)
+    bullet = doc.all_bullets()[0]
+    assert bullet.evidence_path == "tests/test_x.py"
+    assert bullet.evidence_sha == "deadbeef"
+    assert (bullet.evidence_line_start, bullet.evidence_line_end) == (10, 12)
+    assert bullet.permalink == (
+        "https://github.com/octocat/demo/blob/deadbeef/tests/test_x.py#L10-L12")
+
+    # Round-trips through the session/document JSON boundary unchanged.
+    restored = Bullet.from_dict(bullet.to_dict())
+    assert restored.evidence_path == bullet.evidence_path
+    assert restored.evidence_sha == bullet.evidence_sha
+    assert restored.permalink == bullet.permalink
+
+
+def test_permalink_is_empty_without_a_repo_file_and_commit():
+    """A bullet parsed from the user's own resume has no repo evidence at
+    all, and a claim cited to a commit message (not a file) cannot become a
+    blob link -- both must render as "nothing to click", never a broken URL."""
+    yours = Bullet(text="Led a team of 4", origin="yours")
+    assert yours.permalink == ""
+
+    from rba.state import Claim, Evidence, RepoFacts, RepoSummary
+    summary = RepoSummary(repo="octocat/demo", claims=[
+        Claim(id="a", repo="octocat/demo", text="Shipped a release",
+              evidence=[Evidence(path="commit:deadbeef", quote="v1.0.0")]),
+    ])
+    facts = {"octocat/demo": RepoFacts(repo="octocat/demo", head_sha="deadbeef")}
+    doc = from_summaries({"octocat/demo": summary}, facts=facts)
+    assert doc.all_bullets()[0].permalink == ""
+
+
+def test_an_unverified_claim_never_gets_a_permalink():
+    """Found by running a real import: a `needs_measure` claim's evidence
+    path is whatever the model wrote and was never validated -- `verify_claim`
+    returns before resolving it. A live run produced the permalink
+    `.../blob/<sha>/files`, where "files" was the evidence bundle's own JSON
+    key, not a real path in the repo. `from_summaries` must only trust a
+    claim's path/sha/line-range when it actually reached VERIFIED."""
+    from rba.state import Claim, ClaimStatus, Evidence, RepoFacts, RepoSummary
+
+    summary = RepoSummary(repo="octocat/demo", claims=[
+        Claim(id="a", repo="octocat/demo", text="Contains 21 files",
+              status=ClaimStatus.NEEDS_MEASURE, measure_hint="count the files",
+              evidence=[Evidence(path="files", quote="21 files")]),
+    ])
+    facts = {"octocat/demo": RepoFacts(repo="octocat/demo", head_sha="deadbeef")}
+    doc = from_summaries({"octocat/demo": summary}, facts=facts)
+    bullet = doc.all_bullets()[0]
+    assert not bullet.verified
+    assert bullet.evidence_path == "" and bullet.evidence_sha == ""
+    assert bullet.permalink == ""
+    # The quote itself still reaches the document -- only the unvalidated
+    # path/sha/permalink are withheld.
+    assert bullet.evidence == "21 files"
+
+
 # -- attribution ----------------------------------------------------------
 def test_delta_equals_an_independent_rescore():
     """The number shown beside a bullet must be what removing it really costs."""

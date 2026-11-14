@@ -24,6 +24,13 @@ KEY_FILES = ("pyproject.toml", "requirements.txt", "package.json", "go.mod",
              "Cargo.toml", "pom.xml", "Dockerfile", "docker-compose.yml",
              "Makefile", "langgraph.json")
 
+#: How many ranked source files to pull per repo for the code-structure
+#: adapter (`rba.repobrain`). Python-only for now -- see repobrain's module
+#: docstring for why. Bounded to keep this a handful of extra calls, not a
+#: full-repo walk.
+SOURCE_FILE_LIMIT = 12
+SOURCE_FILE_MAX_CHARS = 4000
+
 DEP_PATTERNS = {
     "requirements.txt": re.compile(r"^\s*([A-Za-z0-9_.\-]+)", re.M),
     "pyproject.toml": re.compile(r'"([A-Za-z0-9_.\-]+)\s*[><=~!]'),
@@ -90,9 +97,15 @@ async def fetch_repo_facts(backend, repo: RepoRef, owner: str, config: Config,
             if commits:
                 facts.head_sha = commits[0].get("sha", "")
 
+        # Pin every file fetch below to the exact commit the evidence will
+        # claim it came from. Falling back to the branch name here would let
+        # a push between "list the tree" and "read the file" silently
+        # desync a permalink from the content it supposedly points at.
+        ref = facts.head_sha or repo.default_branch
+
         readme_path = (signals.readme_path if signals else "") or _find_readme(facts.tree)
         if readme_path:
-            text = await backend.get_file(repo.name, readme_path, repo.default_branch)
+            text = await backend.get_file(repo.name, readme_path, ref)
             if text:
                 facts.readme = text[:readme_max]
                 facts.readme_path = readme_path
@@ -100,13 +113,22 @@ async def fetch_repo_facts(backend, repo: RepoRef, owner: str, config: Config,
         present = [f for f in KEY_FILES if f in facts.tree]
         if present:
             contents = await asyncio.gather(
-                *(backend.get_file(repo.name, f, repo.default_branch) for f in present),
+                *(backend.get_file(repo.name, f, ref) for f in present),
                 return_exceptions=True)
             for name, content in zip(present, contents, strict=False):
                 if isinstance(content, str) and content:
                     facts.key_files[name] = content[:3000]
         facts.dependencies = extract_dependencies(facts.key_files)
         facts.languages = repo.languages or await _safe_languages(backend, repo.name)
+
+        source_paths = _ranked_source_paths(facts.tree, SOURCE_FILE_LIMIT)
+        if source_paths:
+            contents = await asyncio.gather(
+                *(backend.get_file(repo.name, p, ref) for p in source_paths),
+                return_exceptions=True)
+            for path, content in zip(source_paths, contents, strict=False):
+                if isinstance(content, str) and content:
+                    facts.source_files[path] = content[:SOURCE_FILE_MAX_CHARS]
     except Exception as exc:  # a single bad repo must not abort the sweep
         log.warning("fetch_facts failed for %s: %s", repo.name, exc)
     return facts
@@ -136,6 +158,19 @@ def _interesting_paths(tree: list[str], limit: int) -> list[str]:
     candidates = [p for p in tree if not _NOISE.search(p)]
     scored = sorted(candidates,
                     key=lambda p: (not _SIGNAL.search(p), p.count("/"), len(p)))
+    return scored[:limit]
+
+
+def _ranked_source_paths(tree: list[str], limit: int) -> list[str]:
+    """The same ranking as `_interesting_paths`, restricted to files the
+    code-structure adapter can actually parse. Python-only today -- see
+    `rba.repobrain`'s module docstring. Test files are deprioritised, not
+    excluded: a test is still real evidence of what the project does, just
+    less often the clearest one."""
+    candidates = [p for p in tree if p.endswith(".py") and not _NOISE.search(p)]
+    scored = sorted(candidates,
+                    key=lambda p: (bool(re.search(r"(^|/)tests?/", p)),
+                                   p.count("/"), len(p)))
     return scored[:limit]
 
 

@@ -21,9 +21,36 @@ class ClaimStatus(StrEnum):
 
 
 class Evidence(BaseModel):
-    """A pointer into a repository that supports a claim."""
+    """A pointer into a repository that supports a claim.
+
+    ``repo``, ``sha`` and the line range are filled in by ``verify_claims``,
+    never by the model: the model only names a path and quotes text, and
+    ``verify_claims`` is what locates that quote in the pinned source (or
+    rejects the claim when it cannot). That is what makes ``permalink`` a
+    fact instead of something the model asserted about itself.
+    """
     path: str = Field(description="File path, or 'commit:<sha>' / 'api:<field>'")
     quote: str = Field(description="Verbatim excerpt from that location")
+    repo: str = ""
+    sha: str = ""
+    line_start: int = 0
+    line_end: int = 0
+
+    @property
+    def permalink(self) -> str:
+        """A GitHub blob permalink, or "" when there is nothing to link --
+        no repo/sha (not yet verified), or the path is a commit/api pseudo-
+        path rather than a real file."""
+        if not (self.repo and self.sha and self.path):
+            return ""
+        if self.path.startswith(("commit:", "api:")):
+            return ""
+        base = f"https://github.com/{self.repo}/blob/{self.sha}/{self.path}"
+        if not self.line_start:
+            return base
+        frag = (f"#L{self.line_start}" if self.line_start == self.line_end
+                else f"#L{self.line_start}-L{self.line_end}")
+        return base + frag
 
 
 class Claim(BaseModel):
@@ -60,6 +87,10 @@ class RepoRef(BaseModel):
     claimable: float = 0.0
     tier: str = ""
     selection_reason: str = ""
+    # Cosine similarity to the user's resume text, via the same local ONNX
+    # embedding the ATS scorer uses -- free, deterministic, no LLM. 0.0 when
+    # no resume text was available or the model could not load.
+    relevance: float = 0.0
 
 
 class RepoFacts(BaseModel):
@@ -78,6 +109,11 @@ class RepoFacts(BaseModel):
     has_ci: bool = False
     dependencies: list[str] = Field(default_factory=list)
     key_files: dict[str, str] = Field(default_factory=dict)
+    # A bounded set of ranked source files (path -> text), fetched at
+    # ``head_sha`` so the summarizer can finally cite real code instead of
+    # a filename it has only ever seen listed. See nodes/fetch.py for the
+    # ranking and cap, and repobrain.py for what gets built from this.
+    source_files: dict[str, str] = Field(default_factory=dict)
 
     @property
     def author_share(self) -> float:
@@ -146,16 +182,32 @@ def _merge_dicts(left: dict, right: dict) -> dict:
 class AgentState(TypedDict, total=False):
     """LangGraph state. Fan-out nodes use reducers so parallel writes merge."""
     username: str
+    # Set only by the CLI. Drives the one conditional edge in the graph: the
+    # browser import omits it and stops at `build_document`.
+    full_run: bool
+    resume_text: str
     repos: list[RepoRef]
+    repos_found: int
     selected: list[RepoRef]
     excluded: list[RepoRef]
     signals: dict[str, Any]
     facts: Annotated[dict[str, RepoFacts], _merge_dicts]
+    # Per-repo code structure (`rba.repobrain.RepoBrain`), built from
+    # `facts[repo].source_files`. Typed `Any` here rather than imported --
+    # repobrain is a plain-dataclass adapter module, not a pydantic state type.
+    repo_graph: Annotated[dict[str, Any], _merge_dicts]
+    # "<repo>:<path>: <reason>" for every source file that could not be
+    # indexed -- a fact to surface, never silently dropped.
+    partial_source: Annotated[list[str], operator.add]
     summaries: Annotated[dict[str, RepoSummary], _merge_dicts]
     evidence_texts: Annotated[dict[str, str], _merge_dicts]
     claims: Annotated[list[Claim], operator.add]
     safety: Annotated[list[SafetyFinding], operator.add]
     scores: dict[str, RoleScore]
+    # The browser/CLI join point: a `rba.resume.document.ResumeDoc`. Typed
+    # `Any` here (not imported) to avoid a state.py <-> resume package cycle --
+    # `resume.document` already imports `Claim`/`Evidence` from this module.
+    document: Any
     resumes: dict[str, Resume]
     comparison: dict[str, Any]
     plan: list[PlanStep]

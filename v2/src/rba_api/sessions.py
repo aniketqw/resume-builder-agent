@@ -8,9 +8,9 @@ all structural:
 
 * the dense memo is only worth having if it outlives a request;
 * a GitHub import runs for minutes and its result has to land somewhere;
-* `attribute`, `variants._measure_gain` and `additions._measure` all toggle the
-  live document and restore it in a ``finally``, which is safe for one caller
-  and wrong for two -- so there has to be one owner with one lock.
+* `attribute` toggles the live document and restores it in a ``finally``,
+  which is safe for one caller and wrong for two -- so there has to be one
+  owner with one lock.
 
 `rev` is the optimistic-concurrency token. A mutation carries the rev it was
 computed against; if the document has moved on, the write is refused with 409
@@ -73,15 +73,13 @@ class Session:
     baseline_doc: ResumeDoc | None = None
     attribution: Any = None
     attribution_signature: str = ""
-    versions: Any = None
     matches: list = field(default_factory=list)
     evidence: dict = field(default_factory=dict)
     repos: list = field(default_factory=list)
     excluded: list = field(default_factory=list)
     facts: dict = field(default_factory=dict)
     summaries: dict = field(default_factory=dict)
-    variants: Any = None
-    additions: Any = None
+    claims: list = field(default_factory=list)
     pathways: dict = field(default_factory=dict)
     stats: dict = field(default_factory=dict)
 
@@ -124,7 +122,6 @@ class Session:
     def _invalidate_derived(self) -> None:
         self.attribution = None
         self.attribution_signature = ""
-        self.versions = None
 
     @property
     def signature(self) -> str:
@@ -141,7 +138,6 @@ class Session:
                        "preferred_skills": self.preferred_skills},
             "ready": {
                 "attribution": self.attribution is not None,
-                "versions": self.versions is not None,
                 "evidence": bool(self.evidence),
                 "pathways": sorted(self.pathways),
             },

@@ -84,6 +84,14 @@ async def _run_import(app_state, session, body: ImportRequest, job) -> dict:
         max_repos=body.max_repos,
         progress=job.report,
         config=app_state.config,
+        # Shared per-effective-key limiter and the one app-scoped cache --
+        # without these, GroqClient.__init__ gives this import a private
+        # Limiter() that believes it owns the whole 8,000 TPM budget (see
+        # deps.py's module docstring for why that is a real bug, not a
+        # theoretical one).
+        limiter=app_state.limiter_for(body.groq_key),
+        cache=app_state.cache,
+        resume_text=session.doc.as_text() if session.doc else "",
     )
 
     async with session.lock:
@@ -114,6 +122,7 @@ async def _run_import(app_state, session, body: ImportRequest, job) -> dict:
         session.repos = result.repos
         session.excluded = result.excluded
         session.stats = result.stats
+        session.claims = result.claims
 
     failure = diagnose_failures(result.stats)
     return {

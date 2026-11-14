@@ -95,8 +95,14 @@ class Config:
 REQUIRED_KEYS = {
     "GROQ_API_KEY": "Groq (summaries, resumes, planning)",
     "TYPESAFE_API_KEY": "TypeSafe/Jev (routing decisions)",
-    "LANGSMITH_API_KEY": "LangSmith (tracing + evals)",
     "GITHUB_PERSONAL_ACCESS_TOKEN": "GitHub MCP server (read-only)",
+}
+
+# Not required to run anything -- tracing is a diagnostic, never a blocker
+# (see enable_tracing()). Kept separate from REQUIRED_KEYS so `rba doctor`
+# does not fail a run over a missing optional key.
+OPTIONAL_KEYS = {
+    "LANGSMITH_API_KEY": "LangSmith (tracing, optional)",
 }
 
 

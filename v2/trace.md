@@ -1,0 +1,242 @@
+# v2 trace
+
+Why-history of the coherence revamp, in the same spirit as `v1/TRACE.md`: every entry is
+traceable to a source in the repository, or says so when it isn't. Each table ends with
+either `> Rationale recorded in <source>.` or `> Reconstructed from the diff.`
+
+**Revert anchor:** `git tag v2-pre-revamp` → commit `8f2f3877fb87ae42a072166fb2e38ebc351b6ae5`
+(tree clean at tagging time). To fully revert: `git reset --hard v2-pre-revamp` (destructive —
+confirm with the user first) or `git diff v2-pre-revamp -- v2/` to see everything this
+revamp touched.
+
+**Baseline before any edit:** `v2/.venv/bin/python -m pytest -q` from `v2/` —
+34 test files, 456 test functions, 540 collected node ids (see run output captured at the
+start of this work for exact pass/fail counts).
+
+**Context:** the LangGraph orchestration in `v2/src/rba/graph.py` existed (12 nodes, SQLite
+checkpointer, one `interrupt()`) but only the CLI ran it — the browser import bypassed it
+entirely via a hand-sequenced subset in `resume/pipeline.py`. Summarization never saw source
+code, only README + file paths + commit messages. This revamp makes the graph the one thing
+both entry points run, gives the summarizer real (if lightweight) code structure via a
+stdlib-`ast` adapter, deletes an orphaned feature cluster, and completes LangSmith tracing.
+
+---
+
+## Iteration 1 — scope and backup
+
+| # | Change | File | Why | What it improves |
+|---|---|---|---|---|
+| 1 | Tagged `v2-pre-revamp` at `8f2f387` | (git) | Revert anchor before any edit, per explicit instruction to back up v2 first | Full revert available with one command |
+| 2 | Added `.claude/skills/langgraph-docs/SKILL.md` | repo root | Spec requires verifying LangGraph APIs against docs/installed version rather than guessing; the old `langchain-ai.github.io` docs host now redirects | Caught the `stream_mode` multi-mode requirement (see iteration below) before it became a bug |
+| 3 | Created this file | `v2/trace.md` | User asked for a revertible, reviewable change log in table format | Mirrors `v1/TRACE.md`'s provenance convention for v2 |
+
+> Reconstructed from the diff.
+
+---
+
+## Iteration 2 — delete the dead cluster
+
+| # | Change | File | Why | What it improves |
+|---|---|---|---|---|
+| 1 | Deleted | `nodes/variants.py`, `nodes/additions.py`, `resume/versions.py`, `resume/grounding.py`, `prompts/variant.v1.md`, `prompts/addition.v1.md`, `prompts/summarize.v1.md`, `tests/test_variants.py`, `tests/test_additions.py`, `tests/test_versions.py`, `tests/test_grounding.py` | Verified zero reverse imports from any entry point (`grep` across `src/`) — a closed orphan component never reachable from the CLI or the API | Coherence: removes a feature cluster that looked wired up (60+ green tests) but was dead on arrival |
+| 2 | Removed `versions`/`variants`/`additions` fields; added `claims` field | `src/rba_api/sessions.py` | Those fields were never assigned non-`None` by anything; checked `web/js/` first — frontend never reads `snapshot()["ready"]["versions"]` | Session struct now only holds live fields; `claims` prepares Step 1b |
+| 3 | Removed `tenacity`, `sse-starlette` | `pyproject.toml` | Zero imports anywhere — retries are hand-rolled in `groq_client.py`/`limiter.py`; SSE frames are hand-formatted over `StreamingResponse` | Declared deps now match what's actually used |
+| 4 | Removed `tiers.fallback`, `routing.compare`, `routing.judge` | `config.yaml` | Verified via grep: no `model_for_tier("fallback")` call anywhere; no node ever calls `client.structured(..., node="compare")` or `node="judge"` — only `summarize_repo`/`build_resumes`/`plan_improvements` do | Config now only lists tiers/routes that are actually read |
+| 5 | Moved `LANGSMITH_API_KEY` out of `REQUIRED_KEYS` into new `OPTIONAL_KEYS` | `config.py`, `cli.py` | `REQUIRED_KEYS` gated `rba doctor`'s blocking exit code — so a missing (optional, per README:74) LangSmith key could fail `doctor` outright | `doctor` now reports it as an informational, non-blocking row |
+
+**Test delta:** 540 → 469 passed (−71, exactly the 4 deleted test files). `ruff check src tests`: all checks passed.
+
+> Rationale recorded in `/Users/aniketsaxena/.claude/plans/resume-builder-v2-staged-otter.md`, Step 1.
+
+---
+
+## Iteration 3 — stop discarding evidence
+
+| # | Change | File | Why | What it improves |
+|---|---|---|---|---|
+| 1 | `Bullet` gains `evidence_path`, `evidence_sha`, and a `permalink` property | `resume/document.py` | `from_summaries` kept `claim.evidence[0].quote` and discarded `.path`; the commit SHA was captured (`fetch.py`) but used only as a cache key — verified directly before writing any code | A generated bullet can now prove itself: `github.com/<repo>/blob/<sha>/<path>`, not just a trust-me quote |
+| 2 | `from_summaries(..., facts=None)` fills both fields from `RepoFacts.head_sha` | `resume/document.py` | `facts` already exists in graph state; nothing new computed | File-level permalinks, ahead of Step 2's line-level upgrade |
+| 3 | `merge_candidates` passes `evidence_path`/`evidence_sha` through | `resume/merge.py` | It rebuilt bullets field-by-field and would have silently dropped both on the merge path (the one the browser actually uses) | Permalinks survive the GitHub-import merge, not just a unit test |
+| 4 | `Session` gets a `claims` field; `routes/github.py` sets `session.claims = result.claims` | `rba_api/sessions.py`, `rba_api/routes/github.py` | `ImportResult.claims` was computed and then never stored on the session | Claims (with evidence) are now reachable from the API, not thrown away two lines before the response |
+| 5 | Two new tests: permalink built + round-trips through `to_dict`/`from_dict`; empty for a `commit:` path or a "yours" bullet | `tests/test_resume.py` | Must not fabricate a link where there is nothing to click | Guards both the happy path and the two cases that must stay empty |
+
+**Test delta:** 469 → 471 passed (+2 new). `ruff check src tests`: all checks passed.
+
+> Rationale recorded in `/Users/aniketsaxena/.claude/plans/resume-builder-v2-staged-otter.md`, Step 1b.
+
+---
+
+## Iteration 4 — repo brain: real source, a call graph, located evidence
+
+| # | Change | File | Why | What it improves |
+|---|---|---|---|---|
+| 1 | New `rba/repobrain.py`: stdlib-`ast` adapter (`index`, `RepoBrain.symbol/callers/callees/call_chain`, `symbol_at_line`) | `repobrain.py` (new) | CodeGraphContext (Neo4j+tree-sitter) was ruled out earlier — protobuf conflict with onnxruntime, no Docker, no Python API. Spec still requires the adapter *shape*; implemented it with zero new deps | A swappable boundary: CGC could implement this same interface later without touching the summarizer or verifier |
+| 2 | Two correctness bugs caught and fixed by my own smoke test before committing: a route decorator (`@router.post(...)`) was showing up as a callee of the function it decorates; a nested function's calls were double-counted under its enclosing function | `repobrain.py` | Verified both empirically, not assumed | `callees()`/`call_chain()` give real, non-duplicated edges |
+| 3 | `RepoFacts.source_files`; `fetch_repo_facts` fetches up to 12 ranked `.py` files per repo | `state.py`, `nodes/fetch.py` | The summarizer had never seen a line of code — only README + filenames + commit messages + dependency names | Real source finally reaches the pipeline, bounded and ranked (non-test files preferred) |
+| 4 | **Bug found and fixed**: README/key-file fetches used `repo.default_branch`, not the pinned `head_sha` | `nodes/fetch.py` | A push between "list the tree" and "read the file" could silently desync content from the commit a permalink claims it came from | Every file read in a run is now pinned to the exact commit that run saw — verified with a ref-recording stub backend |
+| 5 | New `nodes/prepare_evidence.py`: builds a `RepoBrain` per repo from `source_files`, zero LLM calls, surfaces indexing gaps | `nodes/prepare_evidence.py` (new) | Deterministic structure-building step the plan calls for between `fetch_facts` and `safety_scan` (wired into the graph in Step 3) | Partial-source gaps are reported, never silently dropped |
+| 6 | `Evidence` gains `repo`, `sha`, `line_start`, `line_end`, `permalink` — filled in only by `verify_claims`, never by the model | `state.py` | The model should never self-attest its own citation's location | A verified claim carries a real, clickable `blob/<sha>/<path>#L..` link |
+| 7 | `build_evidence` adds a compact `code` block (defs+lines, call edges, routes, 2 short excerpts) from the brain; dropped before `files` under budget pressure; prompt bumped to version 3 (cache invalidates) | `nodes/summarize.py`, `prompts/summarize.v2.md` | Gives the model something real to cite instead of a bare filename | Root-caused fix for the documented tcell/go-json false-citation failure |
+| 8 | `verify_claim` validates `evidence.path` against `facts.tree`/`readme_path`/`source_files` before anything else, and locates each surviving quote's real line range via the brain | `nodes/verify.py` | Closes the "path is model-authored and never validated" hole named in the original spec | A fabricated path is now rejected outright, with a line-numbered citation for everything that survives |
+| 9 | `Bullet` gains `evidence_line_start`/`evidence_line_end`; permalink includes `#L..` fragment; threaded through `from_summaries` and `merge_candidates` | `resume/document.py`, `resume/merge.py` | Completes the Step 1b chain now that a real line range exists | A browser-rendered bullet links straight to the exact lines that support it |
+
+**New test files:** `test_repobrain.py` (8), `test_prepare_evidence.py` (1), `test_summarize.py` (5, first-ever coverage for `build_evidence`/`summarize_one` — none existed before). Extended `test_fetch.py` (+2), `test_verify.py` (+4), `test_resume.py` (updated 1 existing test for the new line-range fields).
+
+**Test delta:** 471 → 491 passed (+20). `ruff check src tests`: all checks passed.
+
+> Rationale recorded in `/Users/aniketsaxena/.claude/plans/resume-builder-v2-staged-otter.md`, Step 2.
+
+---
+
+## Iteration 5 — one graph, one branch
+
+| # | Change | File | Why | What it improves |
+|---|---|---|---|---|
+| 1 | Deleted `make_checkpointer`, `CHECKPOINT_PATH`, `Runner.human_review`, the `review` kwarg, `AsyncSqliteSaver`/`interrupt` imports; `build_graph(runner)` takes one argument | `graph.py` | Both judged "high level, not required right now" | Smaller graph, no msgpack-serialisability constraint on state |
+| 2 | Added `prepare_evidence` node (wraps Step 2's `nodes/prepare_evidence.py`) and `build_document` node (wraps `from_summaries`, zero LLM calls) | `graph.py` | The CLI/browser join point the plan calls for | Both entry points now run through the same evidence-prep and document-build steps |
+| 3 | One conditional edge: `build_document -> build_resumes` iff `state["full_run"]`, else `END` | `graph.py` | Keyed off **state**, not a `Runner` attribute, so the graph is readable standalone | The graph is still 13 named nodes (12 shared + `report` on the CLI branch only), no second hand-sequenced workflow |
+| 4 | `Runner.__init__` gains `github_token`/`groq_key`/`jev_key`/`limiter`/`cache`/`max_repos`, all defaulting empty so CLI behaviour is unchanged; `select()` now constructs its own `JevClient` (was previously only wired in `pipeline.py`, never in the graph) | `graph.py` | Lets one `Runner` serve both the CLI (no per-request creds) and the API (per-request creds), without branching | Prepares Step 5/6: the API's `limiter`/`cache` can finally reach the graph path |
+| 5 | `AgentState` gains `full_run`, `resume_text`, `document` | `state.py` | Forgotten in the first pass at this file (Step 2) — caught immediately because the new tests failed with `KeyError: 'document'` | State is complete for the branch to actually carry a result |
+| 6 | `compare`'s docstring/comment now states explicitly it is role-fit advice from the hand-written rubric, **not the ATS score** | `graph.py` | Honesty fix from the plan's Step 9, done opportunistically while already in this function | No ambiguity between the graph's rubric table and the real `/api/score` scorer |
+| 7 | `test_graph.py`: deleted the 2 human-review tests; `test_full_graph_runs_offline` now passes `full_run=True` and asserts `result["document"]` too; added `test_browser_import_stops_at_the_document` | `tests/test_graph.py` | The test that actually proves CLI and browser share one graph | Same fixtures, same graph, `full_run` is the only difference between the two tests |
+
+**Test delta:** 491 → 490 (−2 human-review, +1 browser-branch). `ruff check src tests`: all checks passed.
+
+> Rationale recorded in `/Users/aniketsaxena/.claude/plans/resume-builder-v2-staged-otter.md`, Step 3.
+
+---
+
+## Iteration 6 — delete `rba resume`
+
+| # | Change | File | Why | What it improves |
+|---|---|---|---|---|
+| 1 | Deleted `resume_run` command, `--review`/`--thread` options on `run`, the `__interrupt__` branch, `make_checkpointer` import | `cli.py` | Nothing left for it to resume — the interrupt and checkpointer are gone | `rba run --help` and `rba resume --help` both verified by hand: options gone, command gone |
+| 2 | `run` now calls `build_graph(runner).ainvoke({"username": u, "full_run": True}, {"recursion_limit": 50})` | `cli.py` | Matches the new 1-arg `build_graph` signature and the `full_run` branch | CLI behaviour otherwise unchanged — verified `rba config` still renders the three real routing entries (`compare`/`judge` correctly absent, from Step 1) |
+
+**Test delta:** none (no test referenced the removed command). `ruff check src tests`: all checks passed.
+
+> Rationale recorded in `/Users/aniketsaxena/.claude/plans/resume-builder-v2-staged-otter.md`, Step 4.
+
+---
+
+## Iteration 7 — `build_from_github` becomes a graph driver
+
+| # | Change | File | Why | What it improves |
+|---|---|---|---|---|
+| 1 | **Bug found and fixed**: `Runner.list_repos` never filtered private repos — only the old hand-sequenced `pipeline.py` did. Unifying onto the graph would have silently reintroduced private-repo leakage | `graph.py`, `state.py` (`repos_found`) | Caught before it shipped by comparing old vs. new behaviour line-by-line, not assumed | `list_repos` now filters to public, matching the original spec's own node description |
+| 2 | `build_from_github` rewritten: builds a `Runner` + `build_graph(runner)`, drives it with `graph.astream({...}, stream_mode=["updates","values"])`, maps node names to `NODE_PROGRESS` entries for the existing `job.report` callback | `resume/pipeline.py` | The hand-sequenced 5-node subset is gone; the browser now runs the identical graph, just without `full_run` | One workflow. The 1,433 s full-run figure no longer applies to the browser path at all, by construction — the seven CLI-only Groq calls never run |
+| 3 | Kept `build_from_github`'s name, signature (+`resume_text`/`limiter`/`cache`) and `ImportResult` contract; kept the two literal `stats["errors"] = ...` / `stats["summarised"] = ...` lines | `resume/pipeline.py` | `test_github_import.py` monkeypatches this name at 3 sites; `test_merge.py:184` does `inspect.getsource()` asserting those exact substrings | Zero test edits needed for either file — both verified green |
+| 4 | **Bug found and fixed**: a real circular import. `pipeline.py` importing `graph.py` at module level crashed in a fresh process when `rba.graph` was the first thing touched (`graph.py` → `resume.document` → `resume/__init__.py` → `pipeline.py` → `graph.py`, mid-init). The full test suite had been passing anyway, by accident of pytest's collection order masking it | `resume/pipeline.py` | Reproduced directly with `python -c "from rba.graph import Runner"` before and after the fix | The exact failure a bare `rba run <user>` would hit in production is gone — deferred the import, matching `cli.py`'s own existing pattern for the same reason |
+| 5 | Added `test_node_progress_covers_every_browser_branch_node` | `tests/test_graph.py` | Guards the one real regression risk: a node renamed in `graph.py` silently losing its SSE progress frame | `set(NODE_PROGRESS) == graph nodes - {__start__,__end__} - CLI-only` |
+
+**Test delta:** 490 → 491 (+1). `ruff check src tests`: all checks passed. Verified by hand in a fresh process: `from rba.graph import Runner` first, `from rba.resume.pipeline import build_from_github` first, and `import rba.cli` — all three clean.
+
+> Rationale recorded in `/Users/aniketsaxena/.claude/plans/resume-builder-v2-staged-otter.md`, Step 5.
+
+---
+
+## Iteration 8 — the dead limiter goes live
+
+| # | Change | File | Why | What it improves |
+|---|---|---|---|---|
+| 1 | `_run_import` passes `limiter=app_state.limiter_for(body.groq_key)`, `cache=app_state.cache`, `resume_text=session.doc.as_text() if session.doc else ""` | `rba_api/routes/github.py` | `AppState.limiter_for` was defined and documented at length but called by nobody — every import got a private `Limiter` believing it owned the whole 8,000 TPM | Closes the exact failure `deps.py`'s own module docstring describes |
+| 2 | New test: two imports with the same Groq key share one `Limiter` object and one `Cache`; resume text reaches the pipeline | `tests/test_github_import.py` | This is one of the acceptance cases named in the original spec ("imports sharing an effective Groq key share the actual limiter") | Verified directly, not by inspection |
+
+**Test delta:** 491 → 492 (+1). `ruff check src tests`: all checks passed.
+
+> Rationale recorded in `/Users/aniketsaxena/.claude/plans/resume-builder-v2-staged-otter.md`, Step 6.
+
+---
+
+## Iteration 9 — resume-aware repo selection
+
+| # | Change | File | Why | What it improves |
+|---|---|---|---|---|
+| 1 | New `score_relevance(repos, signals, resume_text)`: one batched `dense.embed([resume_text, *profiles])` call, cosine similarity clamped at 0 | `nodes/select.py` | The requested capability — "understand from the resume which repos are relevant" — using the same free, deterministic, local embedding the ATS scorer already uses. No LLM, no new dependency | One model pass for the whole candidate set, not one per repo |
+| 2 | `RepoRef.relevance: float = 0.0` | `state.py` | Carries the score without touching the admission logic | `embed` returning `None` (model unavailable) leaves `relevance` at 0 — degrades to exactly today's ranking, verified directly with a monkeypatch |
+| 3 | Sort key becomes `0.75*claimable + 0.25*relevance`; **the admission threshold still tests `claimable` alone** | `nodes/select.py` | Relevance may re-order who makes the cut, but must never promote something Jev judged unclaimable | Verified directly: a repo with a perfect relevance match but `claimable=0.01` still gets rejected |
+| 4 | `rel={relevance:.2f}` appended to `selection_reason` | `nodes/select.py` | The UI's existing "why was this repo excluded" string carries it for free | No new API surface needed |
+| 5 | 4 new tests: relevant repo outranks unrelated at equal claimable; empty resume text is a no-op; unavailable model degrades safely; claimable floor cannot be bought with relevance | `tests/test_select.py` | Covers the real embedding path (this environment has it available) and the degraded path | All 20 `test_select.py` tests pass, including the 16 pre-existing ones unchanged |
+
+**Test delta:** 492 → 496 (+4). `ruff check src tests`: all checks passed.
+
+> Rationale recorded in `/Users/aniketsaxena/.claude/plans/resume-builder-v2-staged-otter.md`, Step 7.
+
+---
+
+## Iteration 10 — complete LangSmith tracing
+
+| # | Change | File | Why | What it improves |
+|---|---|---|---|---|
+| 1 | Verified (via `inspect.signature` on the installed `langsmith 0.14.17`) that LangGraph already auto-traces every node natively when `LANGCHAIN_TRACING_V2`/`LANGCHAIN_API_KEY` are set — confirmed in `langchain_core/callbacks/manager.py`'s `_configure()` and LangGraph's own `_runnable.py` (`from langsmith.run_helpers import _set_tracing_context`) | (verification only) | The spec's own skill (`langgraph-docs`) requires checking installed APIs, not recalling them | Nothing to build for node-level tracing — it already exists once env vars are set early enough |
+| 2 | `enable_tracing()` called in `Runner.__init__`, not only lazily inside `GroqClient.__init__` | `graph.py` | Previously tracing only turned on once a `GroqClient` was constructed inside the `connect` node — so `connect_github` itself ran before tracing was live | Every node, including the first one, is now covered from the start of a run |
+| 3 | `_trace` rewritten: uses `langsmith.run_helpers.get_current_run_tree()` to find the active graph-node run and attach a **child** via `parent.create_child(...).post()/.end()/.patch()`; falls back to a flat root run only when no parent context exists (e.g. a unit test calling `GroqClient` directly) | `groq_client.py` | The old `create_run` had no `parent_run_id`, so every LLM call rendered as a disconnected root next to the trace tree LangGraph was already building | One trace tree per import: all nodes + nested LLM calls, not a flat list |
+| 4 | `start_time`/`end_time` now passed to every trace | `groq_client.py` | The old call passed neither, so latency was never visible | Real per-call latency in LangSmith |
+| 5 | Cache hits are now traced too, as zero-token runs, at the early-return point in `complete()` | `groq_client.py` | A cached completion previously produced no run at all, under-reporting usage | Accounting stays honest for a warm run |
+| 6 | 4 new tests with `StubRunTree`/`StubTracerClient`: nests under an active parent; falls back to root with no parent; cache hit traced at zero tokens; a broken tracer still lets the call succeed | `tests/test_groq_client.py` | `conftest.py` disables tracing for the whole suite, so these are the only tests that actually exercise `_trace`'s new logic (via direct `_tracer` stubbing, bypassing `enable_tracing()`) | Verified the nesting/fallback/cache-hit/failure-isolation behaviour directly, not by inspection |
+
+**Test delta:** 496 → 500 (+4). `ruff check src tests`: all checks passed (one auto-fixed style issue, `datetime.timezone.utc` → `datetime.UTC`).
+
+**Not yet done:** an actual live trace against a real LangSmith project — deferred to final verification, since it needs `GROQ_API_KEY`/`LANGSMITH_API_KEY` and a real import run. `conftest.py`'s tracing-disable (0.8s → 5.8s measurement) is untouched and still load-bearing.
+
+> Rationale recorded in `/Users/aniketsaxena/.claude/plans/resume-builder-v2-staged-otter.md`, Step 8.
+
+---
+
+## Iteration 11 — honesty relabel: rubric advice, not the ATS score
+
+| # | Change | File | Why | What it improves |
+|---|---|---|---|---|
+| 1 | Report's role table: heading → "Role-fit advice (not an ATS score)", column "ATS score" → "Role-fit points", added a one-sentence caveat pointing at the real scorer (`/api/score`) | `report.py` | `routes/meta.py:43-49` already disowns this rubric as "advice... never the score" — the generated report said the opposite | A reader of `out/report.md` sees the same honesty the API already states |
+| 2 | "+N ATS points"/"+N ATS" in the plan section → "+N role-fit points" | `report.py` | Same conflation, in the improvement-plan rendering | Consistent wording throughout one document |
+| 3 | CLI summary table: title "ATS scores" → "role-fit advice (not an ATS score)", column "score" → "points" | `cli.py` | Same fix, visible on every `rba run` | The CLI's own terminal output no longer contradicts the API |
+| 4 | Updated/added tests: heading string, "not an ATS score" caveat present, new column header | `tests/test_report.py` | — | Pins the wording so it can't silently drift back |
+| 5 | (Already done in Iteration 2) `tiers.fallback: qwen/qwen3.8-27b` deleted from `config.yaml` — unreachable, and `json_object`-only, so falling back to it on a strict-schema node would trade a slow success for a parse failure | — | — | No action needed this iteration |
+
+**Scope note:** did not rename the internal `PlanStep.ats_gain` Python attribute or `rba/scoring.py`'s prose — those are internal/non-user-facing and renaming them is materially bigger surgery than the "2-line honesty fix" this step calls for. Only the strings a human actually reads were changed.
+
+**Test delta:** 500 → 501 (+1). `ruff check src tests`: all checks passed.
+
+> Rationale recorded in `/Users/aniketsaxena/.claude/plans/resume-builder-v2-staged-otter.md`, Step 9.
+
+---
+
+## Iteration 12 — live verification, and one real bug it found
+
+Ran a real GitHub import against `aniketqw` (max_repos=2), with real Groq/GitHub/
+TypeSafe/LangSmith credentials from `.env`. Confirmed with the user's explicit
+go-ahead first, since it spends real API quota and posts to a real LangSmith project.
+
+| # | Finding / change | File | Why | What it improves |
+|---|---|---|---|---|
+| 1 | Live run completed in 68.7s (not the documented 1,433s) — `repos_found: 103, public: 60, selected: 2, groq_tokens: 5431, claims_total: 6 (3 verified, 2 needs_measure, 1 rejected)` | (live run) | Confirms the browser-branch stop at `build_document` is what fixes the latency, by construction, not by assumption | Real numbers, not projected ones |
+| 2 | **Real bug found and fixed**: a `needs_measure` (unverified) claim produced a permalink like `github.com/pages-hub/blob/<sha>/files` — "files" was the evidence bundle's own JSON key, not a real path. `verify_claim` only resolves path/sha/line-range for claims that reach VERIFIED; `from_summaries` was building a permalink from unvalidated, model-authored evidence for any non-rejected claim, regardless of status | `resume/document.py` | Exactly the kind of invented-looking-legitimate citation this whole project exists to prevent — and it was caught by running a real import, not by any unit test | Only a VERIFIED claim's path/sha/line-range is ever trusted; a `needs_measure` bullet now shows its quote with no permalink, honestly |
+| 3 | New regression test reproducing the exact live failure (`path="files"`, status=NEEDS_MEASURE) | `tests/test_resume.py` | — | Pins the fix so it can't silently regress |
+| 4 | LangSmith trace verified directly via `Client.list_runs()`: one `trace_id` spanning 60 runs, with real nesting — graph root → `fetch_facts` → nested `list_commits`/`get_file_contents` MCP tool calls (traced automatically, a bonus I didn't have to build), and → `summarize_repo` (chain node) → the two `summarize_repo` (llm) calls as children | (live verification) | Confirms Step 8's design against a real backend, not mocks | "One trace tree per import" is now a verified fact, not a claim |
+
+**Test delta:** 501 → 502 (+1, the permalink regression test). `ruff check src tests`: all checks passed.
+
+---
+
+## Summary
+
+| Gate | Status |
+|---|---|
+| Tests | **502 passed, 0 failed, 0 skipped** (baseline was 540; net change accounts for −71 deleted orphan tests, +33 new tests across the work) |
+| Lint | `ruff check src tests`: all checks passed, throughout every iteration |
+| One graph, two entry points | Verified: `grep -n build_graph src/rba/cli.py src/rba/resume/pipeline.py` hits both; `test_browser_import_stops_at_the_document` proves it |
+| Demo path (resume+JD, resume+role) stays Groq-free | Verified functionally with a guarded `GroqClient.__init__` monkeypatch: zero construction attempts across both paths |
+| Shared limiter | Verified directly: two imports with the same Groq key get the same `Limiter` object |
+| SSE progress | Verified: ≥8 `progress` frames then `done`; `NODE_PROGRESS` keys match the graph's actual node set by a dedicated test |
+| LangSmith tracing | Verified **live**: one `trace_id`, real parent/child nesting, confirmed via `Client.list_runs()` against the real project |
+| Live GitHub import | Run for real, with the user's explicit go-ahead; found and fixed one real bug (see Iteration 12) |
+| CodeGraphContext (real backend) | **Not verified** — ruled out: forces `protobuf==3.20.3`, breaking the `onnxruntime` the ATS dense scorer needs. The adapter boundary (`repobrain.py`) exists and is stdlib-only; CGC could implement the same interface later |
+| Docker | **Not run** — daemon was not running in this environment at any point during this work |
+| `.env` / credentials | Gitignored, untracked, never printed or logged; verified in `.gitignore` before any live call |
+| Commits | **None made.** Working tree is a clean set of uncommitted changes on top of `v2-pre-revamp` (`8f2f387`) |
+
+**Revert:** `git diff v2-pre-revamp -- v2/` shows everything this revamp touched; `git checkout v2-pre-revamp -- v2/` (or `git reset --hard v2-pre-revamp`, destructive) restores the pre-revamp state exactly.
+
+<!-- Further iterations appended below as steps land. Keep entries short: file, why,
+     what it improves. Do not restate the whole plan here — link back to
+     /Users/aniketsaxena/.claude/plans/resume-builder-v2-staged-otter.md for the full design. -->
