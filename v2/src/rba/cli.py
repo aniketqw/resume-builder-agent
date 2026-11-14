@@ -11,7 +11,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from .config import REQUIRED_KEYS, Config, missing_secrets
+from .config import OPTIONAL_KEYS, REQUIRED_KEYS, Config, missing_secrets
 
 app = typer.Typer(add_completion=False, help="Evidence-grounded resume builder.")
 console = Console()
@@ -33,6 +33,9 @@ def doctor(
     for key, what in REQUIRED_KEYS.items():
         present = key not in missing
         rows.append(_check(key, present, what if present else "MISSING — see .env.sample"))
+    for key, what in OPTIONAL_KEYS.items():
+        present = bool(os.environ.get(key))
+        rows.append(_check(key, present, what if present else "not set (optional)"))
 
     docker = shutil.which("docker")
     daemon_up = False
@@ -126,10 +129,8 @@ async def _network_checks(cfg: Config) -> list[tuple[str, bool, str]]:
 def run(
     username: str = typer.Argument(..., help="GitHub username to build from."),
     contact: str = typer.Option("", help="Contact line for the resume header."),
-    review: bool = typer.Option(True, help="Pause for human review before the report."),
     dry_run: bool = typer.Option(False, "--dry-run",
                                  help="Estimate the token budget and spend nothing."),
-    thread: str = typer.Option("default", help="Checkpoint thread id, for resuming."),
     mode: str = typer.Option("", help="Override github.mcp.mode: remote|docker|rest."),
 ) -> None:
     """Run the full graph: GitHub -> claims -> resumes -> plan -> report."""
@@ -144,52 +145,17 @@ def run(
         asyncio.run(_dry_run(cfg, username))
         return
 
-    from .graph import Runner, build_graph, make_checkpointer
+    from .graph import Runner, build_graph
 
-    runner = Runner(cfg, contact=contact, review=review)
-    cfg_arg = {"configurable": {"thread_id": thread}, "recursion_limit": 50}
+    runner = Runner(cfg, contact=contact)
 
     async def go():
-        graph = build_graph(runner, await make_checkpointer())
+        graph = build_graph(runner)
         try:
-            result = await graph.ainvoke({"username": username}, cfg_arg)
-            if "__interrupt__" in result:
-                payload = result["__interrupt__"][0].value
-                console.print("\n[bold yellow]Paused for review[/]")
-                console.print(payload)
-                console.print(
-                    f"\nResume with: [bold]rba resume --thread {thread}[/]")
-                return result
+            result = await graph.ainvoke({"username": username, "full_run": True},
+                                         {"recursion_limit": 50})
             _print_summary(result)
             return result
-        finally:
-            await runner.aclose()
-
-    asyncio.run(go())
-
-
-@app.command()
-def resume_run(
-    thread: str = typer.Option("default", help="Checkpoint thread id to resume."),
-    approve: bool = typer.Option(True, help="Approve as-is."),
-    note: str = typer.Option("", help="Edits or instructions to record."),
-) -> None:
-    """Resume a run that paused at human review."""
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    from langgraph.types import Command
-
-    from .graph import Runner, build_graph, make_checkpointer
-
-    cfg = Config.load()
-    runner = Runner(cfg)
-
-    async def go():
-        graph = build_graph(runner, await make_checkpointer())
-        try:
-            result = await graph.ainvoke(
-                Command(resume={"approved": approve, "note": note}),
-                {"configurable": {"thread_id": thread}, "recursion_limit": 50})
-            _print_summary(result)
         finally:
             await runner.aclose()
 
@@ -199,9 +165,11 @@ def resume_run(
 def _print_summary(result: dict) -> None:
     scores = result.get("scores") or {}
     claims = result.get("claims") or []
-    table = Table(title="ATS scores")
+    # Hand-written rubric, advice only -- never the real ATS score (that one
+    # needs a job description and lives behind /api/score).
+    table = Table(title="role-fit advice (not an ATS score)")
     table.add_column("role")
-    table.add_column("score", justify="right")
+    table.add_column("points", justify="right")
     for k, v in sorted(scores.items(), key=lambda kv: -kv[1].total):
         table.add_row(k, f"{v.total:.1f}")
     console.print(table)

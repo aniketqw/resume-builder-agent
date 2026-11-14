@@ -54,8 +54,13 @@ def render_markdown(state: dict) -> str:
         w("")
 
     if comparison.get("rows"):
-        w("\n## Role comparison\n")
-        w("| Role | ATS score | Keywords | Role fit | Numbers | Recoverable |")
+        w("\n## Role-fit advice (not an ATS score)\n")
+        w("A hand-written rubric, invented to point at what to improve -- "
+          "which keyword is missing, is the resume too long -- never as a "
+          "score. The real ATS score is the three-channel scorer scored "
+          "against a job description you paste, in `/api/score`; this table "
+          "has no job description to compare against.\n")
+        w("| Role | Role-fit points | Keywords | Role fit | Numbers | Recoverable |")
         w("|---|---:|---:|---:|---:|---:|")
         for r in comparison["rows"]:
             c = r["components"]
@@ -86,10 +91,11 @@ def render_markdown(state: dict) -> str:
         total_hours = sum(s.hours for s in plan)
         total_gain = sum(s.ats_gain for s in plan)
         w(f"{len(plan)} steps, ~{total_hours:.0f} hours, "
-          f"+{total_gain:.1f} ATS points if all are completed.\n")
+          f"+{total_gain:.1f} role-fit points if all are completed "
+          f"(rubric advice, not an ATS score).\n")
         for i, s in enumerate(plan, 1):
             w(f"### {i}. {s.title}  \n"
-              f"*{s.hours:.0f}h · +{s.ats_gain} ATS · role: {s.role}"
+              f"*{s.hours:.0f}h · +{s.ats_gain} role-fit · role: {s.role}"
               + (f" · repo: `{s.repo}`" if s.repo else " · new work") + "*\n")
             w(f"- **Gap:** {s.gap}")
             w(f"- **Evidence found:** {s.evidence_found}")

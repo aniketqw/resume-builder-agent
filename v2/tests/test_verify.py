@@ -12,7 +12,8 @@ from rba.nodes.verify import (
     verify_claim,
     verify_claims,
 )
-from rba.state import Claim, ClaimStatus, Evidence, RepoSummary
+from rba.repobrain import index
+from rba.state import Claim, ClaimStatus, Evidence, RepoFacts, RepoSummary
 
 EVIDENCE = """{
  "repo": "live-debugging-partner",
@@ -207,3 +208,68 @@ async def test_node_partitions_claims_and_prunes_tech():
     assert statuses == [ClaimStatus.VERIFIED, ClaimStatus.NEEDS_MEASURE,
                         ClaimStatus.REJECTED]
     assert out["summaries"]["r"].tech == ["Python"]
+
+
+# -- evidence location (closing the model-authored-path hole) --------------
+SOURCE = (
+    "def _resolve(session, body):\n"
+    "    return session.doc, body.target\n"
+    "\n"
+    "async def score_one(req):\n"
+    "    doc, target = _resolve(req.session, req.body)\n"
+    "    return score_many([doc], target)\n"
+)
+
+
+def _facts_with_source() -> RepoFacts:
+    return RepoFacts(repo="octocat/demo", head_sha="deadbeef",
+                     tree=["README.md", "src/app.py"], readme_path="README.md",
+                     source_files={"src/app.py": SOURCE})
+
+
+def test_a_path_not_in_the_pinned_tree_is_rejected():
+    """The model can quote something real and still name a file that does
+    not exist in this snapshot -- that must not pass just because the text
+    happens to be found somewhere in the evidence bundle."""
+    facts = _facts_with_source()
+    c = claim("Ships a resolver", path="src/nonexistent.py",
+              quote="34 tests, about 2 s")
+    out = verify_claim(c, EVIDENCE, facts=facts)
+    assert out.status is ClaimStatus.REJECTED
+    assert "pinned repository snapshot" in out.reason
+
+
+def test_commit_and_api_pseudo_paths_are_never_rejected_for_not_being_a_file():
+    facts = _facts_with_source()
+    c = claim("Ships 34 tests", path="commit:deadbeef")
+    assert verify_claim(c, EVIDENCE, facts=facts).status is ClaimStatus.VERIFIED
+
+
+def test_verified_evidence_gets_a_real_line_range_and_permalink():
+    """verify_claims is the only thing allowed to fill repo/sha/line_start/
+    line_end -- the model is never asked for a line number."""
+    facts = _facts_with_source()
+    brain = index(facts.source_files)
+    c = Claim(id="c1", repo="octocat/demo", text="Resolves session state for each request",
+             evidence=[Evidence(path="src/app.py", quote="return session.doc, body.target")])
+    out = verify_claim(c, "irrelevant evidence text containing "
+                          "return session.doc, body.target",
+                       facts=facts, brain=brain)
+    assert out.status is ClaimStatus.VERIFIED
+    ev = out.evidence[0]
+    assert ev.repo == "octocat/demo" and ev.sha == "deadbeef"
+    assert (ev.line_start, ev.line_end) == (1, 2)  # the enclosing _resolve def
+    assert ev.permalink == (
+        "https://github.com/octocat/demo/blob/deadbeef/src/app.py#L1-L2")
+
+
+def test_a_quote_not_found_in_source_gets_no_line_range():
+    """The README is real evidence but is not source-indexed -- it must get
+    a whole-file permalink, never a fabricated line number."""
+    facts = _facts_with_source()
+    c = claim("Ships 34 tests", path="README.md")
+    out = verify_claim(c, EVIDENCE, facts=facts)
+    assert out.status is ClaimStatus.VERIFIED
+    ev = out.evidence[0]
+    assert (ev.line_start, ev.line_end) == (0, 0)
+    assert ev.permalink == "https://github.com/octocat/demo/blob/deadbeef/README.md"

@@ -54,8 +54,17 @@ def test_markdown_reports_all_three_claim_states():
 
 def test_security_findings_come_first():
     md = render_markdown(sample_state())
-    assert md.index("Security findings") < md.index("Role comparison")
+    assert md.index("Security findings") < md.index("Role-fit advice")
     assert ".env file is committed" in md
+
+
+def test_role_table_is_labelled_advice_not_an_ats_score():
+    """`routes/meta.py` disowns the hand-written rubric as "advice... never
+    the score" -- the report must say the same thing, not call this table
+    an ATS score the way it used to."""
+    md = render_markdown(sample_state())
+    assert "not an ATS score" in md
+    assert "| Role-fit points |" in md
 
 
 def test_evidence_index_cites_sources():

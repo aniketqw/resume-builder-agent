@@ -1,10 +1,15 @@
-"""Running the GitHub pipeline from a UI, with progress and a hard cap.
+"""Running the GitHub pipeline from a browser request.
 
-The CLI path runs the full LangGraph. A web request cannot: Groq's free tier is
-8,000 tokens per minute, a measured full run took 1,433 s including 642 s and
-616 s of rate-limit backoff, and Streamlit Community Cloud drops the websocket
-after roughly 10-15 minutes. So this runs the same nodes with a repo cap small
-enough to finish inside that window, and reports progress as it goes.
+This used to hand-sequence four of the graph's nodes, because a full CLI run
+measured 1,433 s -- 642 s and 616 s of it rate-limit backoff -- which a
+browser request cannot sit through. That is still true, but the fix is not a
+second workflow: it is stopping at the right node. The graph itself now
+branches (see `graph.build_graph`), and the browser path is simply the graph
+run with `full_run` unset, which skips the per-role resumes, the comparison
+table, the plan and the report -- the seven extra Groq calls that caused the
+1,433 s figure in the first place. So this function now *is* a graph driver:
+same twelve nodes, same evidence, same verifier, just a smaller cap on how
+many repos get summarised, and a shorter branch.
 """
 from __future__ import annotations
 
@@ -13,15 +18,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from ..config import Config
-from ..github_tools import make_backend
-from ..groq_client import GroqClient
-from ..jev_client import JevClient
-from ..nodes.fetch import fetch_facts
-from ..nodes.select import select_repos
-from ..nodes.summarize import summarize_repos
-from ..nodes.verify import verify_claims
 from ..preflight import blocking_failures, check_credentials
-from .document import ResumeDoc, from_summaries
+from .document import ResumeDoc
 
 log = logging.getLogger(__name__)
 
@@ -61,67 +59,86 @@ def _noop(_message: str, _fraction: float) -> None:
     return None
 
 
+#: The message/fraction shown for each node as the graph streams past it.
+#: The one place the import progress bar's wording lives. A node renamed in
+#: `graph.py` without a matching update here is caught by
+#: `test_graph.py::test_node_progress_covers_every_browser_branch_node`.
+NODE_PROGRESS: dict[str, tuple[str, float]] = {
+    "connect_github": ("Connecting to GitHub…", 0.05),
+    "list_repos": ("Listing repositories…", 0.15),
+    "select_repos": ("Selecting repositories worth describing…", 0.30),
+    "fetch_facts": ("Reading READMEs, trees and commits…", 0.45),
+    "prepare_evidence": ("Indexing code structure…", 0.50),
+    "safety_scan": ("Scanning for secrets…", 0.55),
+    "summarize_repo": ("Summarising projects…", 0.80),
+    "verify_claims": ("Verifying every claim against its evidence…", 0.90),
+    "build_document": ("Done", 1.0),
+}
+
+
 async def build_from_github(username: str, *, github_token: str = "",
                             groq_key: str = "", jev_key: str = "",
-                            max_repos: int = 6,
+                            max_repos: int = 6, resume_text: str = "",
+                            limiter=None, cache=None,
                             progress: Progress | None = None,
                             config: Config | None = None) -> ImportResult:
-    """Public repos -> verified claims -> an editable resume document."""
+    """Public repos -> verified claims -> an editable resume document.
+
+    Runs the same graph the CLI does, stopped at `build_document` (no
+    `full_run` in the input) -- see the module docstring for why that is
+    enough to fix the 1,433 s figure without a second workflow.
+    """
+    # Local import: `graph` imports `resume.document`, and this package's
+    # `__init__.py` imports this module -- a module-level import here would
+    # be a real cycle, not just a slow one. Reproduced directly: `from
+    # rba.graph import Runner` as the first import in a fresh process raises
+    # ImportError without this being deferred.
+    from ..graph import Runner, build_graph
+
     report = progress or _noop
     cfg = config or Config.load()
-    cfg.raw["selection"]["max_repos"] = max_repos
 
-    # Check credentials before spending anything. Discovering a bad key after
-    # ten repositories have been fetched -- with cached ones masking it -- is
-    # how a stale key in the UI once looked like a per-repository failure.
+    # Check credentials before spending anything, and outside the graph:
+    # this must fail before a single node runs, not partway through one.
+    # Discovering a bad key after ten repositories have been fetched -- with
+    # cached ones masking it -- is how a stale key in the UI once looked
+    # like a per-repository failure.
     report("Checking credentials…", 0.02)
     checks = await check_credentials(groq_key=groq_key or None,
                                      typesafe_key=jev_key or None,
                                      github_token=github_token or None,
                                      config=cfg)
-    stats_checks = [c.line() for c in checks]
+    stats: dict = {"credentials": [c.line() for c in checks]}
     failed = blocking_failures(checks)
     if failed:
         raise RuntimeError("; ".join(c.line() for c in failed))
 
-    report("Connecting to GitHub…", 0.05)
-    backend = await make_backend(cfg, token=github_token or None)
-    stats: dict = {"credentials": stats_checks}
+    runner = Runner(cfg, github_token=github_token, groq_key=groq_key,
+                    jev_key=jev_key, limiter=limiter, cache=cache,
+                    max_repos=max_repos)
+    graph = build_graph(runner)
+    final: dict = {}
     try:
-        repos = await backend.list_repos(username)
-        public = [r for r in repos if not r.is_private]
-        stats["repos_found"] = len(repos)
-        stats["public"] = len(public)
-        report(f"Found {len(public)} public repositories", 0.15)
-
-        state: dict = {"username": username, "repos": public}
-        # Jev is optional: without a key, select_repos falls back to a
-        # heuristic rather than failing the whole import.
-        jev = JevClient(cfg, api_key=jev_key or "") if jev_key else None
-        try:
-            state |= await select_repos(state, config=cfg, backend=backend,
-                                        jev=jev)
-        finally:
-            if jev is not None:
-                await jev.aclose()
-        chosen = state.get("selected", [])
-        stats["selected"] = len(chosen)
-        report(f"Selected {len(chosen)} worth describing", 0.3)
-
-        state |= await fetch_facts(state, backend=backend, config=cfg)
-        report("Read READMEs, trees and commits", 0.45)
+        async for mode, chunk in graph.astream(
+                {"username": username, "resume_text": resume_text},
+                stream_mode=["updates", "values"]):
+            if mode == "updates":
+                for node in chunk:
+                    if node in NODE_PROGRESS:
+                        report(*NODE_PROGRESS[node])
+            elif mode == "values":
+                final = chunk
     finally:
-        await backend.aclose()
+        await runner.aclose()
 
-    async with GroqClient(cfg, api_key=groq_key or None) as client:
-        report("Summarising projects…", 0.55)
-        state |= await summarize_repos(state, client=client, config=cfg)
-        report("Verifying every claim against its evidence…", 0.85)
-        state |= await verify_claims(state)
-        usage = client.usage_report()
+    stats["repos_found"] = final.get("repos_found", 0)
+    stats["public"] = len(final.get("repos") or [])
+    stats["selected"] = len(final.get("selected") or [])
+    if runner.client is not None:
+        usage = runner.client.usage_report()
         stats["groq_tokens"] = sum(v["total"] for v in usage.values())
 
-    claims = state.get("claims") or []
+    claims = final.get("claims") or []
     stats["claims_total"] = len(claims)
     stats["claims_verified"] = sum(
         1 for c in claims if getattr(c.status, "value", "") == "verified")
@@ -132,16 +149,16 @@ async def build_from_github(username: str, *, github_token: str = "",
     # repository cannot lose the whole run. They still have to reach the
     # caller: an invalid Groq key fails every summary, and without this the
     # user gets an empty resume and no reason for it.
-    stats["errors"] = list(state.get("errors") or [])
-    stats["summarised"] = len(state.get("summaries") or {})
+    stats["errors"] = list(final.get("errors") or [])
+    stats["summarised"] = len(final.get("summaries") or {})
 
-    doc = from_summaries(state.get("summaries") or {}, name=username,
-                         headline="", contact=f"github.com/{username}")
-    report("Done", 1.0)
+    public = final.get("repos") or []
+    chosen = final.get("selected") or []
     return ImportResult(
-        doc=doc, stats=stats,
-        facts=dict(state.get("facts") or {}),
-        summaries=dict(state.get("summaries") or {}),
+        doc=final.get("document") or ResumeDoc(name=username),
+        stats=stats,
+        facts=dict(final.get("facts") or {}),
+        summaries=dict(final.get("summaries") or {}),
         claims=list(claims),
         repos=list(public),
         selected=list(chosen),

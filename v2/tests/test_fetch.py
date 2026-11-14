@@ -1,6 +1,8 @@
 from rba.config import Config
 from rba.nodes.fetch import (
+    SOURCE_FILE_LIMIT,
     _interesting_paths,
+    _ranked_source_paths,
     extract_dependencies,
     fetch_repo_facts,
 )
@@ -87,3 +89,48 @@ async def test_readme_is_truncated_to_the_configured_budget():
     backend = StubBackend(["README.md"], [], {"README.md": "x" * (limit * 3)})
     facts = await fetch_repo_facts(backend, RepoRef(name="big"), "me", cfg)
     assert len(facts.readme) == limit, "prompt budget must be bounded"
+
+
+def test_ranked_source_paths_are_python_only_and_bounded():
+    tree = (["src/a.py", "src/b.py", "tests/test_a.py", "src/img.png",
+             "README.md", "src/lib.go"]
+            + [f"src/extra{i}.py" for i in range(20)])
+    ranked = _ranked_source_paths(tree, SOURCE_FILE_LIMIT)
+    assert len(ranked) == SOURCE_FILE_LIMIT
+    assert all(p.endswith(".py") for p in ranked)
+    # Non-Python source and non-source files never make the cut.
+    assert "src/lib.go" not in ranked and "README.md" not in ranked
+    # Non-test files are preferred over test files when both compete for
+    # the same slot (the bound here is deliberately tight to force that).
+    assert "src/a.py" in ranked and "src/b.py" in ranked
+
+
+class RefRecordingBackend(StubBackend):
+    """Records the ref every get_file call was made with, so the pinned-SHA
+    fix in fetch_repo_facts can be verified directly rather than trusted."""
+
+    def __init__(self, tree, commits, files):
+        super().__init__(tree, commits, files)
+        self.refs_seen: list[str] = []
+
+    async def get_file(self, repo, path, ref=""):
+        self.refs_seen.append(ref)
+        return self._files.get(path)
+
+
+async def test_readme_and_key_files_are_pinned_to_head_sha_not_the_branch():
+    """Before this, README and key-file fetches used repo.default_branch --
+    so if the branch moved between listing the tree and reading the file,
+    the content could silently desync from the commit a permalink claims it
+    came from. Every file read must use the exact commit this run saw."""
+    backend = RefRecordingBackend(
+        tree=["README.md", "pyproject.toml", "src/app.py"],
+        commits=[{"sha": "pinned-sha", "author": "me", "message": "x", "date": ""}],
+        files={"README.md": "# x", "pyproject.toml": "x = 1",
+               "src/app.py": "def f():\n    pass\n"},
+    )
+    repo = RepoRef(name="demo", default_branch="main")
+    facts = await fetch_repo_facts(backend, repo, "me", Config.load())
+    assert facts.head_sha == "pinned-sha"
+    assert backend.refs_seen and all(r == "pinned-sha" for r in backend.refs_seen)
+    assert facts.source_files.get("src/app.py") == "def f():\n    pass\n"

@@ -2,7 +2,6 @@
 import json
 
 import pytest
-from langgraph.checkpoint.memory import InMemorySaver
 
 from fakes import FakeGroq, FakeJev, chat_response
 from rba.cache import Cache
@@ -91,7 +90,7 @@ def runner(monkeypatch):
     jev = FakeJev({"claimable": {"noul": 0.9},
                    "tier": {"choice": "small", "confidence": 0.9}})
 
-    r = Runner(cfg, contact="a@b.com | github.com/x", review=False)
+    r = Runner(cfg, contact="a@b.com | github.com/x")
 
     async def fake_connect(state):
         r.backend = github
@@ -115,10 +114,11 @@ def runner(monkeypatch):
 
 
 async def test_full_graph_runs_offline(runner, tmp_path):
+    """The CLI branch: full_run=True walks every node through to the report."""
     runner.config.raw["report"]["out_dir"] = str(tmp_path)
-    graph = build_graph(runner, InMemorySaver())
-    result = await graph.ainvoke({"username": "aniketqw"},
-                                 {"configurable": {"thread_id": "t1"}})
+    graph = build_graph(runner)
+    result = await graph.ainvoke({"username": "aniketqw", "full_run": True},
+                                 {"recursion_limit": 50})
     await runner.aclose()
 
     assert [r.name for r in result["selected"]] == ["demo"]
@@ -128,6 +128,9 @@ async def test_full_graph_runs_offline(runner, tmp_path):
     assert statuses["Ships 34 tests that run in about 2 s"] is ClaimStatus.VERIFIED
     # 40% appears nowhere in the evidence.
     assert statuses["Reduced latency by 40%"] is ClaimStatus.NEEDS_MEASURE
+
+    # The browser/CLI join point ran too, on the way to the role resumes.
+    assert result["document"].all_bullets()
 
     assert "balanced" in result["resumes"]
     assert result["scores"]["balanced"].total > 0
@@ -144,29 +147,36 @@ async def test_full_graph_runs_offline(runner, tmp_path):
     assert "Measure these" in md
 
 
-async def test_graph_pauses_for_human_review(runner, tmp_path):
-    runner.review = True
+async def test_browser_import_stops_at_the_document(runner, tmp_path):
+    """The thing that proves CLI and browser share one graph: the same
+    fixtures, the same graph, and omitting `full_run` is the only
+    difference. No role resumes, no plan, no report file -- just the
+    evidence-backed document the browser actually shows."""
     runner.config.raw["report"]["out_dir"] = str(tmp_path)
-    graph = build_graph(runner, InMemorySaver())
-    result = await graph.ainvoke({"username": "aniketqw"},
-                                 {"configurable": {"thread_id": "t2"}})
+    graph = build_graph(runner)
+    result = await graph.ainvoke({"username": "aniketqw"}, {"recursion_limit": 50})
     await runner.aclose()
-    assert "__interrupt__" in result, "review must stop the graph before the report"
-    payload = result["__interrupt__"][0].value
-    assert payload["best_role"] == "balanced"
-    assert not (tmp_path / "report.md").exists(), "no report before approval"
+
+    doc = result["document"]
+    bullets = doc.all_bullets()
+    assert bullets and any("34 tests" in b.text for b in bullets)
+    # Every surviving bullet must carry enough to prove itself.
+    verified = [b for b in bullets if b.verified]
+    assert verified and all(b.evidence_sha for b in verified)
+
+    assert "resumes" not in result
+    assert "plan" not in result
+    assert not (tmp_path / "report.md").exists()
 
 
-async def test_review_resumes_and_writes_the_report(runner, tmp_path):
-    from langgraph.types import Command
+def test_node_progress_covers_every_browser_branch_node(runner):
+    """Guards the one real regression risk in wiring NODE_PROGRESS by hand in
+    pipeline.py: a node renamed in build_graph() must not silently lose its
+    SSE progress frame."""
+    from rba.resume.pipeline import NODE_PROGRESS
 
-    runner.review = True
-    runner.config.raw["report"]["out_dir"] = str(tmp_path)
-    graph = build_graph(runner, InMemorySaver())
-    cfg = {"configurable": {"thread_id": "t3"}}
-    await graph.ainvoke({"username": "aniketqw"}, cfg)
-    result = await graph.ainvoke(Command(resume={"approved": True, "note": "ship it"}),
-                                 cfg)
-    await runner.aclose()
-    assert result["review"]["approved"] is True
-    assert (tmp_path / "report.md").exists()
+    graph = build_graph(runner)
+    cli_only = {"build_resumes", "compare", "plan_improvements", "report"}
+    browser_nodes = (set(graph.get_graph().nodes)
+                    - {"__start__", "__end__"} - cli_only)
+    assert set(NODE_PROGRESS) == browser_nodes

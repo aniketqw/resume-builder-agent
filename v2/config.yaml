@@ -6,7 +6,6 @@ groq:
     small:    openai/gpt-oss-20b
     mid:      openai/gpt-oss-20b
     big:      openai/gpt-oss-120b
-    fallback: qwen/qwen3.8-27b      # json_object only; langchain-groq drops strict=True here
   # Free-tier limits, confirmed from x-ratelimit-* response headers.
   # Buckets are per-model, so tier routing also buys throughput.
   limits:
@@ -31,13 +30,12 @@ jev:
   # Used ONLY for routing/selection. Never writes resume text.
   enabled: true
 
-# Which node runs on which tier.
+# Which node runs on which tier. `compare` is pure arithmetic (no LLM call);
+# it has no entry here on purpose.
 routing:
   summarize_repo:    small
   build_resumes:     mid
-  compare:           big
   plan_improvements: big
-  judge:             big
 
 selection:
   max_repos: 25

@@ -26,6 +26,12 @@ from ..state import AgentState, RepoRef
 
 log = logging.getLogger(__name__)
 
+#: How much resume-similarity should matter next to Jev's own claimability
+#: judgement. Deliberately a minority weight: relevance re-orders who makes
+#: the cut, but a repo Jev judged unclaimable can never be promoted by it --
+#: the admission threshold below still tests `claimable` alone.
+_RELEVANCE_WEIGHT = 0.25
+
 CLAIMABLE_Q = noul(
     "Based on the evidence provided, is this repository substantial, original "
     "engineering work that the author could legitimately present as a portfolio "
@@ -167,6 +173,38 @@ async def score_with_jev(repos: list[RepoRef], jev: JevClient,
     await asyncio.gather(*(one(r) for r in repos))
 
 
+def score_relevance(repos: list[RepoRef], signals: dict[str, RepoSignals],
+                    resume_text: str) -> None:
+    """Annotate each repo in place with `relevance`: cosine similarity
+    between the resume text and a short per-repo profile, via one batched
+    call to the same local embedding the ATS scorer uses.
+
+    One call for the whole candidate set, not one per repo -- `dense.embed`
+    batches internally, so this costs one model pass regardless of how many
+    repos there are. Leaves `relevance` at 0.0 (i.e. a no-op) when there is
+    no resume text or the embedding model is unavailable; nothing downstream
+    needs to branch on that.
+    """
+    if not resume_text or not repos:
+        return
+    from ..ats.dense import embed
+
+    profiles = []
+    for r in repos:
+        sig = signals.get(r.name)
+        readme_head = getattr(sig, "readme_head", "") if sig else ""
+        profiles.append(" ".join(filter(None, [
+            r.name, r.description, r.language,
+            " ".join(r.topics), readme_head[:600],
+        ])))
+    vectors = embed([resume_text, *profiles])
+    if vectors is None:
+        return
+    resume_vec = vectors[0]
+    for r, vec in zip(repos, vectors[1:], strict=True):
+        r.relevance = max(0.0, float(resume_vec @ vec))
+
+
 async def select_repos(state: AgentState, *, config: Config | None = None,
                        jev: JevClient | None = None, backend=None) -> AgentState:
     cfg = config or Config.load()
@@ -207,9 +245,21 @@ async def select_repos(state: AgentState, *, config: Config | None = None,
         if owned_jev:
             await jev.aclose()
 
+    resume_text = state.get("resume_text") or ""
+    if resume_text:
+        score_relevance(candidates, signals, resume_text)
+        for r in candidates:
+            if r.relevance:
+                r.selection_reason = f"{r.selection_reason} rel={r.relevance:.2f}"
+
     threshold = cfg.get("selection.min_claimable", 0.45)
     max_repos = cfg.get("selection.max_repos", 25)
-    ranked = sorted(candidates, key=lambda r: (-r.claimable, -r.size_kb, r.name))
+    # Relevance re-orders who makes the cut; the admission threshold below
+    # still tests `claimable` alone, so it can never promote a repo Jev
+    # judged unclaimable.
+    ranked = sorted(candidates, key=lambda r: (
+        -((1 - _RELEVANCE_WEIGHT) * r.claimable + _RELEVANCE_WEIGHT * r.relevance),
+        -r.size_kb, r.name))
     selected = [r for r in ranked if r.claimable >= threshold][:max_repos]
 
     return {

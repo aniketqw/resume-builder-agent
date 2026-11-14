@@ -144,3 +144,122 @@ async def test_cache_hit_costs_zero_tokens(tmp_path):
     assert second.usage.total_tokens == 0 and second.usage.cached
     assert len(fake.requests) == 1, "second call must not hit the network"
     assert cache.hit_rate == 0.5
+
+
+# -- tracing: nest under the active graph run, not a flat root -------------
+class StubRunTree:
+    """Stands in for `langsmith.run_trees.RunTree` -- just enough surface
+    for `_trace` to exercise: `create_child`, `post`, `end`, `patch`."""
+
+    def __init__(self, name="root", inputs=None):
+        self.name = name
+        self.inputs = inputs
+        self.outputs = None
+        self.posted = False
+        self.ended = False
+        self.patched = False
+        self.children: list[StubRunTree] = []
+
+    def create_child(self, name, run_type="chain", inputs=None, start_time=None):
+        child = StubRunTree(name, inputs)
+        self.children.append(child)
+        return child
+
+    def post(self):
+        self.posted = True
+
+    def end(self, outputs=None, end_time=None):
+        self.outputs = outputs
+        self.ended = True
+
+    def patch(self):
+        self.patched = True
+
+
+class StubTracerClient:
+    """Stands in for `langsmith.Client` -- only `create_run` is used."""
+
+    def __init__(self):
+        self.root_runs: list[dict] = []
+
+    def create_run(self, **kw):
+        self.root_runs.append(kw)
+
+
+async def test_trace_nests_under_the_active_graph_run(monkeypatch):
+    """Before this, every call was a flat `create_run` with no parent -- a
+    disconnected root next to whatever trace tree LangGraph already built
+    for the node that called it. `get_current_run_tree()` is how to find
+    that in-progress parent; this is what it looks like when one exists."""
+    fake = FakeGroq([chat_response('{"ok": true}')])
+    c = client(fake)
+    c._tracer = StubTracerClient()
+    parent = StubRunTree("connect_github")
+    monkeypatch.setattr("langsmith.run_helpers.get_current_run_tree", lambda: parent)
+
+    await c.complete([{"role": "user", "content": "hi"}], node="summarize_repo")
+    await c.aclose()
+
+    assert not c._tracer.root_runs, "must not also create a disconnected root"
+    assert len(parent.children) == 1
+    child = parent.children[0]
+    assert child.name == "summarize_repo"
+    assert child.posted and child.ended and child.patched
+    assert child.outputs["usage"]["total"] == 2074
+
+
+async def test_trace_falls_back_to_a_root_run_outside_a_graph_context(monkeypatch):
+    """A `GroqClient` used directly (a unit test, a script) has no active
+    LangGraph node run to nest under -- the trace must still be recorded,
+    just as a root, not silently dropped."""
+    fake = FakeGroq([chat_response('{"ok": true}')])
+    c = client(fake)
+    c._tracer = StubTracerClient()
+    monkeypatch.setattr("langsmith.run_helpers.get_current_run_tree", lambda: None)
+
+    await c.complete([{"role": "user", "content": "hi"}], node="summarize_repo")
+    await c.aclose()
+
+    assert len(c._tracer.root_runs) == 1
+    run = c._tracer.root_runs[0]
+    assert run["name"] == "summarize_repo"
+    assert run["start_time"] is not None and run["end_time"] is not None
+
+
+async def test_a_cache_hit_is_traced_as_a_zero_token_run(monkeypatch, tmp_path):
+    """Before this, `_trace` was only called on the success path *after*
+    the cache-hit early return -- a cached completion never produced a run
+    at all, under-reporting usage in anything that reads LangSmith for it."""
+    cfg = Config.load()
+    cache = Cache(tmp_path / "c.sqlite")
+    fake = FakeGroq([chat_response('{"ok":1}')])
+    c = GroqClient(config=cfg, limiter=Limiter(cfg), cache=cache, api_key="k",
+                   transport=fake.transport())
+    c._tracer = StubTracerClient()
+    monkeypatch.setattr("langsmith.run_helpers.get_current_run_tree", lambda: None)
+
+    msgs = [{"role": "user", "content": "hi"}]
+    await c.complete(msgs, tier="small", cache_key="repo@sha@v1")
+    await c.complete(msgs, tier="small", cache_key="repo@sha@v1")
+    await c.aclose()
+
+    assert len(c._tracer.root_runs) == 2
+    assert c._tracer.root_runs[1]["outputs"]["usage"]["cached"] is True
+    assert c._tracer.root_runs[1]["outputs"]["usage"]["total"] == 0
+
+
+async def test_tracing_failure_never_breaks_the_call(monkeypatch):
+    """The one invariant that must survive any change here."""
+    fake = FakeGroq([chat_response('{"ok": true}')])
+    c = client(fake)
+
+    class ExplodingTracer:
+        def create_run(self, **kw):
+            raise RuntimeError("langsmith is down")
+
+    c._tracer = ExplodingTracer()
+    monkeypatch.setattr("langsmith.run_helpers.get_current_run_tree", lambda: None)
+
+    res = await c.complete([{"role": "user", "content": "hi"}], tier="small")
+    await c.aclose()
+    assert res.parsed() == {"ok": True}
