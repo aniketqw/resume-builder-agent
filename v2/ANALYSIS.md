@@ -70,6 +70,56 @@ calls a browser import never needed in the first place. Stopping early
 | 11 | `compare` | CLI-only: a hand-written rubric comparison table (explicitly **not** the ATS score — see §4's honesty note) | no |
 | 12 | `plan_improvements` | CLI-only: an improvement plan with `[MEASURE: ...]` tasks for anything unverified | yes |
 
+**The actual compiled graph**, exported directly from `build_graph(Runner(...))`
+by `scripts/export_graph.py` — not hand-drawn, so it can't drift out of sync
+with `graph.py`. The dotted edges are the one conditional branch
+(`_after_document`): the browser import stops at `build_document` and goes
+straight to `__end__`; only a CLI run (`full_run=True`) continues into
+`build_resumes`.
+
+```mermaid
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	connect_github(connect_github)
+	list_repos(list_repos)
+	select_repos(select_repos)
+	fetch_facts(fetch_facts)
+	prepare_evidence(prepare_evidence)
+	safety_scan(safety_scan)
+	summarize_repo(summarize_repo)
+	verify_claims(verify_claims)
+	build_document(build_document)
+	build_resumes(build_resumes)
+	compare(compare)
+	plan_improvements(plan_improvements)
+	report(report)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> connect_github;
+	build_document -.-> __end__;
+	build_document -.-> build_resumes;
+	build_resumes --> compare;
+	compare --> plan_improvements;
+	connect_github --> list_repos;
+	fetch_facts --> prepare_evidence;
+	list_repos --> select_repos;
+	plan_improvements --> report;
+	prepare_evidence --> safety_scan;
+	safety_scan --> summarize_repo;
+	select_repos --> fetch_facts;
+	summarize_repo --> verify_claims;
+	verify_claims --> build_document;
+	report --> __end__;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc
+```
+
+*Regenerate with `.venv/bin/python scripts/export_graph.py` after any change
+to `graph.py` — it writes `docs/v2-graph.mmd` (the source above) and tries
+`docs/v2-graph.png` via LangGraph's `draw_mermaid_png()` (calls out to
+mermaid.ink; skipped gracefully if that's unreachable, since the Mermaid
+source alone already renders natively in a GitHub-viewed markdown file).*
+
 **Why this node ordering specifically:** Groq cannot combine tool use with
 structured JSON output in one request. So every node that touches GitHub's
 MCP tools (`fetch_facts`) is strictly separated from every node that asks

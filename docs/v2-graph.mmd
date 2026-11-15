@@ -1,0 +1,39 @@
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	connect_github(connect_github)
+	list_repos(list_repos)
+	select_repos(select_repos)
+	fetch_facts(fetch_facts)
+	prepare_evidence(prepare_evidence)
+	safety_scan(safety_scan)
+	summarize_repo(summarize_repo)
+	verify_claims(verify_claims)
+	build_document(build_document)
+	build_resumes(build_resumes)
+	compare(compare)
+	plan_improvements(plan_improvements)
+	report(report)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> connect_github;
+	build_document -.-> __end__;
+	build_document -.-> build_resumes;
+	build_resumes --> compare;
+	compare --> plan_improvements;
+	connect_github --> list_repos;
+	fetch_facts --> prepare_evidence;
+	list_repos --> select_repos;
+	plan_improvements --> report;
+	prepare_evidence --> safety_scan;
+	safety_scan --> summarize_repo;
+	select_repos --> fetch_facts;
+	summarize_repo --> verify_claims;
+	verify_claims --> build_document;
+	report --> __end__;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc
