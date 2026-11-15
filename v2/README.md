@@ -8,6 +8,41 @@ See the [root README](../README.md) for what differs between the two and why.
 
 ---
 
+## What's new
+
+**The dense ATS channel no longer truncates a resume to fit the embedding
+model's 512-token window.** `bge-small-en-v1.5` still reads 512 tokens per
+pass, but a resume is now chunked along its own section/entry boundaries,
+each chunk embedded, and the vectors mean-pooled into one — so a full
+one-page resume (typically ~1,150 tokens as plain text) is read in its
+entirety instead of losing its back half. A real determinism bug this
+surfaced (the same chunk scored a reproducible ~4.3e-08 differently
+depending on which other candidates shared its batch) was found, measured,
+and fixed so a document's own score stays bit-exact regardless of what
+else is being swept alongside it. A new **Evidence & Call-Graph** tab also
+shipped: pick an imported repo and see every claim's status
+(verified/needs-measurement/rejected) next to its quoted evidence and a
+real GitHub permalink, plus the repo's indexed functions/classes/call edges
+— so "why did this line make it onto my resume" is answerable from the UI,
+not just from the API.
+
+**Three real bugs from a live GitHub import and a real resume upload were
+found and fixed**, each root-caused against the actual failure rather than
+patched around: Groq's strict-schema rejections (a claim shaped wrong, not
+a response cut short) now get a corrective retry instead of a blind,
+useless one; a 4000-character truncation applied to every fetched source
+file *before* it was parsed for code structure was cutting files off
+mid-token, producing spurious syntax errors that had nothing to do with
+the code itself; and PDF table parsing (the "ACADEMIC DETAILS" /
+"CERTIFICATIONS" grids) moved from guessing column boundaries out of
+`pypdf`'s flattened, reading-order-dependent text to detecting the real
+table geometry with `pdfplumber` — verified directly against a real
+uploaded resume PDF, not only synthetic fixtures. Full root-cause detail
+and the live verification for each lives in `trace.md` and
+`PLAN_PIPELINE_FIXES.md`.
+
+---
+
 ## Run it
 
 ### Locally
