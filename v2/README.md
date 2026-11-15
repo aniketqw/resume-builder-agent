@@ -1,10 +1,13 @@
 # Resume Builder Agent — v2
 
-A FastAPI service and a browser workbench over the same scoring engine as [v1](../v1).
-v1's interface is a Streamlit page; this one is a two-pane workbench with a live
-preview of the resume and a measured score delta beside every line.
+A FastAPI service and a browser workbench over a deterministic three-channel
+ATS scorer, plus a LangGraph agent that turns a GitHub account into
+evidence-linked resume content.
 
-See the [root README](../README.md) for what differs between the two and why.
+For the full architecture — the LangGraph pipeline, the scoring math with its
+citations, the claim-verification mechanism, and a file-by-file reference —
+see **[`ANALYSIS.md`](ANALYSIS.md)**. An earlier Streamlit prototype is kept
+in [`v1/`](../v1) for history.
 
 ---
 
