@@ -284,6 +284,37 @@ passed.
 
 ---
 
+## Iteration 15 — GitHub-import reliability, found via a real live run
+
+A real import against the user's own GitHub account surfaced four real bugs
+the test suite hadn't caught. Full reasoning, root-cause citations and
+verification detail for each live in `v2/PLAN_PIPELINE_FIXES.md` (kept as a
+standing, continuously-updated handoff document, not folded entirely into
+this entry) -- this is the short version.
+
+| # | Finding / change | File | Why | What it improves |
+|---|---|---|---|---|
+| 1 | Groq's strict-schema 400s (`json_validate_failed`) were retried by blindly doubling `max_tokens` regardless of cause -- correct for a genuine truncation, useless for a real shape violation (a claim missing its required `text` field). New `SchemaRejectedError(GroqError)` distinguishes the two; `structured()` now retries a shape violation with a corrective message showing the model its own bad generation, the same repair already used for a client-side `ValidationError` | `groq_client.py` | Measured live: 3 real repos failed outright with this exact 400 before the fix | Confirmed live post-fix: the retry now genuinely runs (log shows `"schema validation failed after retry"` only after a second distinct mistake, not the old blind retries) -- a real improvement, not a full fix for every repo every time |
+| 2 | `fetch_repo_facts` truncated every source file to 4000 chars *before* `repobrain.index()`'s `ast.parse()`, guaranteeing a `SyntaxError` on any file over that length (landing mid-token) -- also silently made any verified claim's quote past that cutoff unverifiable | `nodes/fetch.py` | Reproduced live: the user's own repo's source files filled `partial_source` with spurious syntax errors that had nothing to do with code quality | Cap raised to 60,000 chars (a safety ceiling, not an expected truncation point); `verify_claims`' quote-matching gets full files too |
+| 3 | `read_pdf()`'s flat `pypdf` text extraction destroys a PDF table's column structure, and the text-only `_parse_table` heuristic cannot always recover it -- confirmed live: the user's "ACADEMIC DETAILS" table rendered with headers and values in the wrong cells entirely | `resume/ingest.py` | New `pdfplumber`-based `read_pdf_tables()`/`_pick_table()`/`_table_from_grid()` detect the real table geometry instead of guessing from reordered text, with the old heuristic kept as a fallback | Verified against the user's actual uploaded PDF (not just synthetic fixtures): the table now recovers headers and rows correctly, matching what the live import had garbled |
+| 4 | First pass of fix #3 only checked a detected grid's row 0 for the header row -- missed that pdfplumber merges a section's heading line into the same table as the header row below it when nothing visually separates them, which is **every real resume tested**, not an edge case | `resume/ingest.py` | Found by testing fix #3 against the user's real PDF, not assuming the synthetic tests were representative | `_pick_table` now searches a grid's first 3 rows for the real header; verified the regression test fails without this depth search and passes with it |
+| 5 | Measured, not re-tuned: pulled real per-node timing for a live import via the LangSmith SDK directly (`list_runs(trace_id=...)` -- the web UI doesn't render through a simple fetch). Confirmed `fetch_facts`/`summarize_repos` concurrency already works (overlapping tool-call timestamps); the real cost was `select_repos` (68.9s, Jev classification) and Groq rate limiting, neither of which the existing concurrency caps control | (measurement only) | Deliberately did not raise `McpBackend`'s or `summarize_repos`'s concurrency caps without a second measurement to justify it -- an unverified tweak is exactly what this project's house style forbids | Confirms the caps are not the bottleneck today; left as-is rather than guessed at |
+
+**Not yet done, tracked in `PLAN_PIPELINE_FIXES.md`**: Ollama as a
+configurable alternative to Groq (model chosen and smoke-tested --
+`qwen2.5:14b-instruct` on a shared lab GPU host -- client code not yet
+written), a requested refactor pass, and re-confirming the frontend
+preview/export against the corrected table end to end.
+
+**Test delta:** full suite **532 passed, 0 failed** (was 522 at the end of
+Iteration 14; +10 across the new regression tests for findings #1-#4).
+`ruff check src tests`: all checks passed. `pdfplumber>=0.11.4` added as a
+new dependency (`pyproject.toml`); `uv sync --extra dev` required (not
+plain `uv sync`) to keep `pytest`/`ruff` in the venv, since they live under
+the `dev` optional-dependency group, not the main dependency set.
+
+---
+
 ## Summary
 
 | Gate | Status |

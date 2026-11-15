@@ -29,7 +29,23 @@ KEY_FILES = ("pyproject.toml", "requirements.txt", "package.json", "go.mod",
 #: docstring for why. Bounded to keep this a handful of extra calls, not a
 #: full-repo walk.
 SOURCE_FILE_LIMIT = 12
-SOURCE_FILE_MAX_CHARS = 4000
+
+#: A safety ceiling, not an expected-to-be-hit truncation point. This used
+#: to be 4000 and applied unconditionally -- but `source_files` feeds
+#: `repobrain.index()`'s `ast.parse()` (`nodes/prepare_evidence.py`) and
+#: `verify_claims`' quote matching (`nodes/verify.py`), both of which need
+#: syntactically/textually complete files. Cutting a file off at 4000 chars
+#: landed mid-token on anything longer, producing a guaranteed
+#: `SyntaxError` on every such file (reproduced live: a repo's own source
+#: files, truncated mid-string-literal, filled `partial_source` with
+#: spurious parse errors that had nothing to do with the code's real
+#: quality) -- and silently made any genuine claim whose quoted evidence
+#: fell past that cutoff unverifiable. 60,000 chars is generous enough that
+#: ordinary hand-written source essentially never hits it; it exists only
+#: to stop one pathological huge generated/vendored file from bloating
+#: `AgentState` (which flows through every graph node, see `trace.md`'s
+#: note on this) without bound.
+SOURCE_FILE_MAX_CHARS = 60_000
 
 DEP_PATTERNS = {
     "requirements.txt": re.compile(r"^\s*([A-Za-z0-9_.\-]+)", re.M),

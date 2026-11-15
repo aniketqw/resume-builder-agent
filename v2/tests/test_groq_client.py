@@ -2,10 +2,10 @@
 import pytest
 from pydantic import BaseModel
 
-from fakes import FakeGroq, chat_response, reasoning_trap_response
+from fakes import FakeGroq, chat_response, reasoning_trap_response, schema_rejected_response
 from rba.cache import Cache
 from rba.config import Config
-from rba.groq_client import MIN_MAX_TOKENS, GroqClient, GroqError
+from rba.groq_client import MIN_MAX_TOKENS, GroqClient, GroqError, SchemaRejectedError
 from rba.limiter import Limiter
 
 
@@ -93,6 +93,51 @@ async def test_structured_retries_once_on_schema_violation():
 
 async def test_structured_gives_up_after_the_retry():
     fake = FakeGroq([chat_response('{"bad":1}'), chat_response('{"also":"bad"}')])
+    async with client(fake) as c:
+        with pytest.raises(GroqError, match="schema validation failed"):
+            await c.structured([{"role": "user", "content": "hi"}], Summary, tier="small")
+
+
+async def test_a_shape_violation_400_raises_schema_rejected_not_groqerror():
+    """`complete()` must not try to repair this one itself: growing
+    `max_tokens` does nothing for a shape violation, and `structured()`
+    cannot apply its correction-message repair to a plain `GroqError` it
+    can't distinguish from any other 4xx."""
+    fake = FakeGroq([schema_rejected_response()])
+    async with client(fake) as c:
+        with pytest.raises(SchemaRejectedError) as exc_info:
+            await c.complete([{"role": "user", "content": "hi"}], tier="small",
+                             schema=Summary)
+    assert "missing properties" in str(exc_info.value)
+    assert exc_info.value.failed_generation == '{"claims":[{"evidence":[]}]}'
+    assert len(fake.requests) == 1, "complete() must not retry this itself"
+
+
+async def test_structured_recovers_from_a_real_schema_rejected_400():
+    """The live failure this guards against: three real GitHub-import repos
+    failed exactly this way (`summarize_repo[...]`: 400, missing `text`),
+    because the old code treated this identically to the max-tokens case --
+    retrying with a bigger budget and an unchanged prompt, which cannot fix
+    a shape violation. `structured()` must now show the model its own bad
+    generation and ask again, the same repair already used for a
+    client-side `ValidationError`."""
+    fake = FakeGroq([schema_rejected_response(),
+                     chat_response('{"one_line":"ok","tech":[]}')])
+    async with client(fake) as c:
+        obj, _usage = await c.structured([{"role": "user", "content": "hi"}], Summary,
+                                        tier="small")
+    assert obj.one_line == "ok"
+    assert len(fake.requests) == 2
+    retry_prompt = fake.requests[1]["messages"][-1]["content"]
+    assert "did not match the schema" in retry_prompt
+    # The corrected prompt must include the model's own prior (bad) answer,
+    # not just an abstract description of the problem -- the same repair
+    # `structured()` already does for a client-side ValidationError.
+    assert fake.requests[1]["messages"][-2]["content"] == '{"claims":[{"evidence":[]}]}'
+
+
+async def test_structured_gives_up_after_a_second_schema_rejected_400():
+    fake = FakeGroq([schema_rejected_response(), schema_rejected_response()])
     async with client(fake) as c:
         with pytest.raises(GroqError, match="schema validation failed"):
             await c.structured([{"role": "user", "content": "hi"}], Summary, tier="small")

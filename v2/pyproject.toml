@@ -30,6 +30,14 @@ dependencies = [
   # MCP is the default GitHub backend, not an optional extra.
   "langchain[mcp]>=1.0",
   "pypdf>=6.21.4",
+  # pypdf's extract_text() flattens a PDF into reading order with no column
+  # information -- fine for prose, but it destroys a table's row/column
+  # structure (see `resume/ingest.py`'s `_parse_table`, whose heuristics
+  # exist only to guess that structure back). pdfplumber's table detector
+  # (`page.find_tables()`) uses actual rule/gap geometry instead of guessing
+  # from a reordered text stream, which is what a real academic/certification
+  # table needs. Both libraries stay -- pypdf still backs the prose path.
+  "pdfplumber>=0.11.4",
   "fpdf2>=2.8.9",
   # The web layer. v1 served Streamlit; v2 serves its own API and a static SPA,
   # so streamlit is deliberately absent.

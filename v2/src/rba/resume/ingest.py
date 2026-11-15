@@ -21,9 +21,12 @@ long lines. Two rules recover most of it:
 from __future__ import annotations
 
 import io
+import logging
 import re
 
 from .document import Bullet, Entry, Header, KeyValues, ResumeDoc, Section, Table
+
+log = logging.getLogger(__name__)
 
 # Headings are the one thing this format is strict about: short, all-caps,
 # on their own line.
@@ -66,6 +69,92 @@ def read_pdf(data: bytes) -> str:
 
     reader = PdfReader(io.BytesIO(data))
     return "\n".join(page.extract_text() or "" for page in reader.pages)
+
+
+#: Header tokens that identify ACADEMIC DETAILS vs CERTIFICATIONS tables when
+#: matching a pdfplumber-detected grid to a section -- see `_pick_table`.
+#: Shares its vocabulary with `_split_headers`'s text-heuristic fallback
+#: rather than inventing a second list that could drift from it.
+_ACADEMIC_HEADER_TOKENS = {"COURSE", "SPECIALIZATION", "INSTITUTE/COLLEGE",
+                           "BOARD/UNIVERSITY", "SCORE", "YEAR"}
+_CERT_HEADER_TOKENS = {"CERTIFICATION", "CERTIFYING AUTHORITY"}
+
+
+def read_pdf_tables(data: bytes) -> list[list[list[str]]]:
+    """Every grid pdfplumber can detect, across every page.
+
+    `pypdf`'s `extract_text()` (used by `read_pdf` above) flattens a page
+    into a single reading-order text stream with no column information --
+    fine for prose, but it is exactly what destroys a real 2-column table's
+    structure (see this module's docstring). pdfplumber's table detector
+    uses actual geometry instead of guessing from reordered text: ruled
+    lines first (`find_tables()`'s default "lines" strategy, which needs
+    visible cell borders), and a gap-based fallback ("text" strategy, no
+    borders needed) for a borderless, alignment-only table -- common in a
+    template that never draws a grid. Returns raw `list[list[str]]` grids;
+    cleaning and section-matching happens in `_pick_table`/`_table_from_grid`.
+    Never raises -- a page pdfplumber cannot read contributes no tables
+    rather than aborting the whole parse.
+    """
+    import pdfplumber
+
+    grids: list[list[list[str]]] = []
+    try:
+        with pdfplumber.open(io.BytesIO(data)) as doc:
+            for page in doc.pages:
+                found = page.find_tables()
+                if not found:
+                    found = page.find_tables(table_settings={
+                        "vertical_strategy": "text", "horizontal_strategy": "text"})
+                for table in found:
+                    grid = [[(cell or "").strip() for cell in row]
+                           for row in table.extract()]
+                    if any(any(cell for cell in row) for row in grid):
+                        grids.append(grid)
+    except Exception as exc:
+        log.debug("pdfplumber table detection failed: %s", exc)
+    return grids
+
+
+#: How many of a detected grid's leading rows to check for the real header
+#: row. Not always row 0: pdfplumber frequently merges the section's own
+#: heading line (e.g. "ACADEMIC DETAILS", alone in a one-cell row) into the
+#: same detected table as the row immediately below it, since nothing in
+#: the PDF's geometry visually separates a heading from the grid it
+#: introduces. Confirmed directly against a real uploaded resume -- see
+#: `tests/test_ingest.py`'s pdfplumber tests for the reproduction.
+_HEADER_SEARCH_DEPTH = 3
+
+
+def _pick_table(grids: list[list[list[str]]], tokens: set[str]
+               ) -> tuple[list[list[str]], int] | None:
+    """The detected grid (and the row index within it) whose row best
+    matches `tokens`, consumed from `grids` (removed) so the same table
+    can't be assigned to two sections. `None` if nothing scores at least 2
+    matches -- the heuristic text-based `_parse_table` is the fallback for
+    that case, not a guess."""
+    best_idx, best_row, best_score = -1, -1, 1
+    for i, grid in enumerate(grids):
+        for row_idx, row in enumerate(grid[:_HEADER_SEARCH_DEPTH]):
+            header_cells = {c.strip().upper() for c in row}
+            score = sum(1 for t in tokens if t in header_cells)
+            if score > best_score:
+                best_idx, best_row, best_score = i, row_idx, score
+    if best_idx < 0:
+        return None
+    return grids.pop(best_idx), best_row
+
+
+def _table_from_grid(grid: list[list[str]], header_row: int = 0) -> Table:
+    """`grid[header_row]` becomes `Table.headers`; every later non-blank
+    row becomes a `Table.rows` entry, column-aligned exactly as pdfplumber
+    found it -- no re-guessing which cell is which. Anything *before*
+    `header_row` (a merged-in section heading, see `_pick_table`) is
+    dropped, not treated as a data row."""
+    headers = [c.strip() for c in grid[header_row]]
+    rows = [[c.strip() for c in row] for row in grid[header_row + 1:]
+           if any(c.strip() for c in row)]
+    return Table(headers=headers, rows=rows)
 
 
 def looks_like_bits(text: str) -> bool:
@@ -206,22 +295,55 @@ def _split_label(line: str) -> tuple[str, str]:
     return line, ""
 
 
+def _extract_extras(lines: list[str],
+                    tables: list[list[list[str]]] | None = None
+                    ) -> list[tuple[str, str]]:
+    """`Subjects / Electives ...` sits under ACADEMIC DETAILS but is not a
+    table row -- pulled out here so it survives regardless of whether the
+    table itself came from a detected pdfplumber grid or the text heuristic
+    below.
+
+    `Subjects / Electives` is itself laid out as its own small label-value
+    grid in the original PDF -- confirmed live: pypdf's flat extraction put
+    the label on its own line with the value nowhere adjacent to it (lost
+    to reading order, the same failure class this whole fix addresses), but
+    pdfplumber detected it correctly as a one-row, two-cell table. When the
+    text-only split finds no value, look for that detected row before
+    giving up on it.
+    """
+    extras = []
+    for line in lines:
+        if not line.startswith(("Subjects", "Electives")):
+            continue
+        label, value = _split_label(line)
+        if not value and tables:
+            for grid in tables:
+                for row in grid:
+                    if (len(row) >= 2 and row[0].strip()
+                            and row[0].strip() == line.strip()):
+                        value = row[1].strip()
+                        break
+                if value:
+                    break
+        extras.append((label, value))
+    return extras
+
+
 def _parse_table(lines: list[str]) -> tuple[Table, list[tuple[str, str]]]:
     """A grid whose rows end in a year, plus any trailing label-value lines.
 
-    `Subjects / Electives ...` sits under ACADEMIC DETAILS but is not a table
-    row, so it is handed back separately rather than forced into the grid.
+    Text-only fallback: used when no pdfplumber-detected grid matched this
+    section (see `_pick_table` in `parse_bits`), or the source was plain
+    text to begin with.
     """
     headers: list[str] = []
     rows: list[list[str]] = []
-    extras: list[tuple[str, str]] = []
     buffer = ""
     for line in lines:
         if not headers and line.isupper() and not _YEAR_END.search(line):
             headers = _split_headers(line)
             continue
         if line.startswith(("Subjects", "Electives")):
-            extras.append(_split_label(line))
             continue
         if len(headers) <= 2:
             # No trailing year to mark the end of a row, so one line is one
@@ -234,7 +356,7 @@ def _parse_table(lines: list[str]) -> tuple[Table, list[tuple[str, str]]]:
             buffer = ""
     if buffer:
         rows.append(_split_row(buffer, len(headers)))
-    return Table(headers=headers, rows=rows), extras
+    return Table(headers=headers, rows=rows), _extract_extras(lines)
 
 
 def _split_headers(line: str) -> list[str]:
@@ -309,10 +431,20 @@ def _split_two(row: str) -> list[str]:
     return [" ".join(words[:-1]), words[-1]] if len(words) > 1 else [row, ""]
 
 
-def parse_bits(text: str, origin: str = "yours") -> ResumeDoc:
-    """Parse the BITS one-page format into an editable document."""
+def parse_bits(text: str, origin: str = "yours",
+               detected_tables: list[list[list[str]]] | None = None) -> ResumeDoc:
+    """Parse the BITS one-page format into an editable document.
+
+    `detected_tables` is pdfplumber's per-page grids from `read_pdf_tables`
+    -- real column structure, when the source was a PDF and a grid was
+    found. The text-only heuristic path (`_parse_table`) below remains the
+    fallback for a plain-text resume, or a table pdfplumber's detector
+    missed (not every layout draws borders or aligned whitespace it can
+    read) -- it is not deleted, only no longer the only path.
+    """
     head_lines, raw_sections = _split_sections(text.splitlines())
     header = _parse_header(head_lines)
+    tables = list(detected_tables) if detected_tables else []
 
     doc = ResumeDoc(name=header.name, header=header)
     for title, lines in raw_sections:
@@ -323,7 +455,14 @@ def parse_bits(text: str, origin: str = "yours") -> ResumeDoc:
             doc.sections.append(Section(title=title, body=_parse_keyvalues(lines)))
             continue
         if title in ("ACADEMIC DETAILS", "CERTIFICATIONS"):
-            table, extras = _parse_table(lines)
+            tokens = _ACADEMIC_HEADER_TOKENS if title == "ACADEMIC DETAILS" else _CERT_HEADER_TOKENS
+            found = _pick_table(tables, tokens)
+            if found is not None:
+                grid, header_row = found
+                table, extras = (_table_from_grid(grid, header_row),
+                                 _extract_extras(lines, tables))
+            else:
+                table, extras = _parse_table(lines)
             # Electives sit under ACADEMIC DETAILS in the original, so they
             # stay there rather than becoming a heading of their own.
             note = " ".join(f"{label}: {value}" for label, value in extras)
@@ -342,12 +481,16 @@ def parse_bits(text: str, origin: str = "yours") -> ResumeDoc:
 
 def parse_resume(data: bytes | str, *, filename: str = "") -> ResumeDoc:
     """Front door: bytes from an upload, or already-extracted text."""
+    tables: list[list[list[str]]] = []
     if isinstance(data, bytes):
-        text = read_pdf(data) if data[:4] == b"%PDF" else data.decode("utf-8", "replace")
+        is_pdf = data[:4] == b"%PDF"
+        text = read_pdf(data) if is_pdf else data.decode("utf-8", "replace")
+        if is_pdf:
+            tables = read_pdf_tables(data)
     else:
         text = data
     if looks_like_bits(text):
-        return parse_bits(text)
+        return parse_bits(text, detected_tables=tables)
     from .pipeline import parse_resume_text
 
     return parse_resume_text(text)
