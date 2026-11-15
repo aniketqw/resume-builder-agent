@@ -20,6 +20,7 @@ what makes it safe to carry a `RepoBrain` (plain dataclasses) and a
 from __future__ import annotations
 
 import logging
+import os
 import time
 
 from langgraph.graph import END, START, StateGraph
@@ -36,6 +37,7 @@ from .nodes.safety import safety_scan
 from .nodes.select import select_repos
 from .nodes.summarize import summarize_repos
 from .nodes.verify import verify_claims
+from .ollama_client import OllamaClient
 from .report import write_reports
 from .resume.document import from_summaries
 from .scoring import load_roles
@@ -72,14 +74,22 @@ class Runner:
         if max_repos:
             self.config.raw.setdefault("selection", {})["max_repos"] = max_repos
         self.backend = None
-        self.client: GroqClient | None = None
+        self.client: GroqClient | OllamaClient | None = None
         self.started = time.time()
 
     # -- nodes ------------------------------------------------------------
     async def connect(self, state: AgentState) -> AgentState:
         self.backend = await make_backend(self.config, token=self.github_token or None)
-        self.client = GroqClient(self.config, api_key=self.groq_key or None,
-                                 limiter=self.limiter, cache=self.cache)
+        # "ollama" trades Groq's 8,000 TPM free-tier rate limit (a repeated,
+        # measured bottleneck -- see trace.md Iteration 15) for a self-hosted
+        # model with no quota at all. Both clients expose the same
+        # `structured()` shape, so nothing downstream of this branch knows
+        # or cares which one it got.
+        if os.environ.get("LLM_PROVIDER", "groq").strip().lower() == "ollama":
+            self.client = OllamaClient(self.config, cache=self.cache)
+        else:
+            self.client = GroqClient(self.config, api_key=self.groq_key or None,
+                                     limiter=self.limiter, cache=self.cache)
         username = state.get("username") or ""
         log.info("connected via %s for user %s",
                  type(self.backend).__name__, username)

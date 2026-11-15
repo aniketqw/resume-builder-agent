@@ -62,6 +62,16 @@ _YEAR_END = re.compile(r"\b(19|20)\d{2}\s*$")
 _SCORE = re.compile(r"(\d+(?:\.\d+)?\s*(?:%|CGPA|GPA))\s*$", re.I)
 _HEADER_FIELD = re.compile(r"^(?P<label>[A-Z][A-Za-z /&]{1,22})\s*:\s*(?P<value>.+)$")
 
+#: A bullet in this format is usually recognised by ending in a full stop
+#: (see `_join_wrapped`'s docstring) -- but at least one real PDF export
+#: used a bullet glyph (`\x7f`, a private-use-area character some PDF
+#: producers emit for a bullet dingbat) with no terminal punctuation at
+#: all, which made every bullet in an entry merge into one. A leading
+#: marker is as hard a "new bullet" signal as a trailing period, so both
+#: are honoured. Shares its character set with `pipeline.py`'s flat-text
+#: parser (`"-*•·—"`), plus the one confirmed live.
+_BULLET_MARKERS = "-*•·—\x7f"
+
 
 def read_pdf(data: bytes) -> str:
     """Extract text from a PDF. Raises if the file is not readable as one."""
@@ -216,17 +226,55 @@ def _is_heading(line: str) -> bool:
     return bool(stripped) and not stripped.endswith(".") and len(stripped) <= 120
 
 
+def _merge_split_dates(lines: list[str]) -> list[str]:
+    """Rejoin a title and its date range when the PDF put them on two
+    separate lines instead of one.
+
+    Confirmed live: `pypdf`'s extraction is not consistent about this --
+    some exports of the same BITS format keep "Title ... May 2026 - Jul
+    2026" as one line (the existing heading logic below handles that), but
+    at least one real upload put every single entry's date on its own line
+    immediately after the title, with nothing else on it. Without this,
+    `_parse_entries` never recognises the title line as a heading at all
+    (it carries no date) and silently drops it as "stray text before the
+    first entry" -- the title-only line gets treated as if it belonged to
+    no entry, and the date-only line becomes an entry with an empty title.
+    """
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        nxt = lines[i + 1] if i + 1 < len(lines) else ""
+        date_only = DATE_RANGE.search(nxt.strip())
+        if (_is_heading(line) and not DATE_RANGE.search(line)
+                and date_only and date_only.start() == 0):
+            out.append(f"{line.rstrip()} {nxt.strip()}")
+            i += 2
+            continue
+        out.append(line)
+        i += 1
+    return out
+
+
 def _join_wrapped(lines: list[str]) -> list[str]:
     """Rejoin bullets split across lines by the PDF's line breaks.
 
-    A bullet in this format is a sentence ending in a full stop. So a line that
-    does not end a sentence is continued by the next one -- unless that next
-    line starts a new entry (it carries a date range) or is a `Tech:` line.
+    A bullet in this format is usually a sentence ending in a full stop, so
+    a line that does not end a sentence is continued by the next one --
+    unless that next line starts a new entry (it carries a date range), is
+    a `Tech:` line, or opens with a bullet marker (`_BULLET_MARKERS`) --
+    confirmed live as its own, equally hard signal: at least one real PDF
+    export used a bullet glyph with no terminal punctuation on any bullet
+    at all, which the period-only rule below would otherwise merge into
+    one.
     """
     out: list[str] = []
-    for line in lines:
-        starts_new = (_is_heading(line) and bool(DATE_RANGE.search(line))) \
-            or line.startswith("Tech:")
+    for raw in lines:
+        left = raw.lstrip()
+        has_marker = bool(left) and left[0] in _BULLET_MARKERS
+        line = left[1:].strip() if has_marker else raw
+        starts_new = has_marker or line.startswith("Tech:") \
+            or (_is_heading(line) and bool(DATE_RANGE.search(line)))
         if out and not starts_new and not out[-1].endswith((".", ":")) \
                 and not (_is_heading(out[-1]) and DATE_RANGE.search(out[-1])) \
                 and not out[-1].startswith("Tech:"):
@@ -239,7 +287,7 @@ def _join_wrapped(lines: list[str]) -> list[str]:
 def _parse_entries(lines: list[str], origin: str = "yours") -> list[Entry]:
     """Dated entries with an optional `Tech:` line and unmarked bullets."""
     entries: list[Entry] = []
-    for line in _join_wrapped(lines):
+    for line in _join_wrapped(_merge_split_dates(lines)):
         match = DATE_RANGE.search(line) if _is_heading(line) else None
         if match:
             heading = line[: match.start()].strip(" .,-|\u2013\u2014")

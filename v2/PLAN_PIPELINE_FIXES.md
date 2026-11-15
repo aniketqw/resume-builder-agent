@@ -581,19 +581,52 @@ real upload, not just the synthetic fpdf2 fixtures in
 
 ## New work items from this session, in the order the user wants them (fixes first, these after)
 
-1. **Finish diagnosing Fix 3's real-world miss** (above) before anything
-   else -- the frontend fix (item 4) depends on this being right first.
-2. **Ollama as a configurable alternative to Groq** (IN PROGRESS -- model
-   chosen and reachable; client code not yet written). Full detail in its
-   own section below ("Ollama: current state"). Short version: endpoint
-   `http://172.24.16.155:11434`, a server-side permissions bug on
-   `/home/admin/ollama-models` was found and fixed directly (`chmod 777`),
-   model `qwen2.5:14b-instruct` (Q4_K_M, 8.99 GB) is pulled and already
-   smoke-tested for structured JSON output -- clean, schema-matching JSON
-   on the first try, no corrective retry needed (contrast with
-   `openai/gpt-oss-20b` via Groq, which needed Fix 1's retry path and still
-   failed outright for 2/N repos in the live import). Next actual step:
-   write the client code (see that section for the exact design).
+1. **Finish diagnosing Fix 3's real-world miss** -- DONE. Fixed and
+   verified directly against the user's real PDF (`H20250169_ Sarvam
+   AI.pdf`): pdfplumber merges a section's heading line into the same
+   detected table as its header row; `_pick_table` now searches the first
+   3 rows of a grid instead of assuming row 0. Committed as `3ea32c9`
+   (pushed to `v2-revamp`). Full detail in Fix 3's own STATUS entry above.
+2. **Ollama as a configurable alternative to Groq** -- DONE, verified live
+   against the real remote host (not just a fake transport). New
+   `src/rba/ollama_client.py`: `OllamaClient.structured()` matches
+   `GroqClient.structured()`'s exact shape (`(messages, schema, *, node,
+   tier, model, cache_key, **overrides) -> (T, Usage)`), POSTs to
+   `/api/chat` with `format` set to the schema's real JSON Schema (not
+   `"json"` mode), retries once on a schema violation with the same
+   corrective-message repair `GroqClient` uses, fills `Usage` from
+   Ollama's real `prompt_eval_count`/`eval_count` fields, and supports the
+   same `Cache` class Groq uses (so a repeat prompt costs zero tokens
+   either way). No rate limiter -- that is the entire point.
+   `graph.py`'s `Runner.connect()` now branches on `LLM_PROVIDER` (env var,
+   default `groq`); nothing in `nodes/summarize.py`/`build.py`/`plan.py`
+   needed to change, confirmed by grepping for every `client.structured()`
+   call site before writing this. `config.yaml` gained an `ollama:`
+   section (`base_url`/`model` defaults, overridable per-environment via
+   `OLLAMA_BASE_URL`/`OLLAMA_MODEL`); `.env`/`.env.sample` gained
+   `LLM_PROVIDER`/`OLLAMA_BASE_URL`/`OLLAMA_MODEL`. Six new tests in
+   `tests/test_ollama_client.py` (fake-transport pattern matching
+   `test_groq_client.py`: schema shape, retry-on-violation, give-up-after-
+   retry, 4xx not retried, cache hit costs zero tokens, usage grouped by
+   node) -- all pass. **Also verified with a real, non-fake call** against
+   `http://172.24.16.155:11434` directly (not through the test suite):
+   summarized a one-line repo description into 3 correctly-shaped claims
+   on the first attempt, `Usage(prompt_tokens=53, completion_tokens=139,
+   total_tokens=192)`. Full suite after this change: 538 passed, 0 failed,
+   lint clean.
+   - **Known gap, not yet addressed**: `OllamaClient` does not yet feed
+     LangSmith tracing the way `GroqClient._trace()` does (child runs
+     nested under the active graph-node run). Usage accounting
+     (`usage_report()`/`usage_total()`) works identically to `GroqClient`,
+     so cost/token reporting in the CLI/API is unaffected -- only the
+     LangSmith trace tree would be missing the per-call child spans for an
+     Ollama-backed run. Address this if/when Ollama becomes the default
+     rather than an opt-in, not before.
+   - **Not yet done**: an actual end-to-end GitHub import run with
+     `LLM_PROVIDER=ollama` set, to compare real schema-failure rate and
+     claim quality against today's Groq run -- the direct `structured()`
+     call above proves the client works, not that a full import's claims
+     come out good.
 3. **Refactor** -- user's own words: "it is a little bit too bulky." Scope
    not yet defined; likely candidates after today's additions are
    `groq_client.py` (now carries two schema-failure paths) and
@@ -601,14 +634,47 @@ real upload, not just the synthetic fpdf2 fixtures in
    after Ollama is in, not before -- adding a second LLM backend will
    reshape `groq_client.py`'s boundaries anyway, so refactoring it twice
    would be wasted motion.
-4. **Frontend rendering** -- user's explicit final priority ("the most
-   important thing is like you have to fix the front end part"). Likely
-   mostly resolved once Fix 3's real-world miss (item 1) is actually
-   fixed, since `html.py`/`latex.py` were already confirmed to render
-   whatever `Table` object they're given correctly -- the defect has
-   consistently traced back to parsing, not rendering, every time it's
-   been checked. Re-confirm against a real corrected render before
-   assuming this is only a parsing problem.
+4. **Frontend rendering** -- DONE, verified live through `/api/render/html`
+   against the user's real PDF end to end. Confirmed, again, that the
+   defect was never in `html.py`/`latex.py`: both already rendered
+   whatever document structure they were given correctly. Re-checking the
+   *whole* real document's render (not just the one table) surfaced two
+   more, entirely new, real parsing bugs in `resume/ingest.py` -- neither
+   related to tables:
+   - **Title and date on separate lines**: this PDF's extraction put an
+     entry's heading ("Software Firmware Engineer, Marvell
+     Semiconductors") and its date range ("May 2026 - Jul 2026") on two
+     separate lines, not one. `_parse_entries` only recognised a heading
+     when both were on the same line -- the title-only line was silently
+     dropped as "stray text before the first entry," and the date-only
+     line became an entry with an **empty title**. New `_merge_split_dates()`
+     rejoins a heading-shaped, date-less line with an immediately
+     following pure-date line before `_parse_entries` ever sees them.
+     Affected every single entry in this real resume (Internships,
+     Projects, Position of Responsibility), not an isolated case.
+   - **Bullets with no terminal punctuation**: this PDF's bullet glyph
+     extracted as `\x7f` (a private-use-area character some PDF producers
+     emit for a bullet dingbat), and none of its bullets ended in a
+     period. `_join_wrapped`'s only "new bullet" signal was a trailing
+     full stop, so all three bullets under "Internships" merged into one.
+     A leading bullet marker (`_BULLET_MARKERS = "-*•·—\x7f"`, sharing its
+     character set with `pipeline.py`'s flat-text parser) is now an
+     equally hard signal, and the marker itself is stripped from the
+     stored text.
+   - Two new regression tests in `tests/test_ingest.py`
+     (`test_a_title_and_date_on_separate_lines_still_make_one_entry`,
+     `test_bullets_with_a_glyph_marker_and_no_terminal_period_stay_separate`)
+     reproduce both exactly, built from the real extracted lines (not
+     guessed). **Verified both catch the bug**: temporarily reverted both
+     changes, confirmed both tests fail with the predicted wrong output
+     (empty title; one 3x-length merged bullet), restored the fixes,
+     confirmed both pass.
+   - Re-verified the entire real document end to end, live, through
+     `POST /api/render/html`: every entry across Internships, Projects,
+     and Position of Responsibility now has the correct title, subtitle,
+     dates, and individually-separated bullets.
+   - Full suite after this: **540 passed, 0 failed.** `ruff check src
+     tests`: all checks passed.
 
 ---
 

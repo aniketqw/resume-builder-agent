@@ -24,6 +24,18 @@ groq:
   token_estimate_margin: 0.10
   max_retries: 5
 
+# A self-hosted alternative to Groq (`ollama_client.py`), opted into with
+# LLM_PROVIDER=ollama in .env. No rate limit to configure here -- that is
+# the reason this exists, see trace.md Iteration 15. `base_url`/`model`
+# below are the defaults; override per-environment with the matching env
+# vars (OLLAMA_BASE_URL, OLLAMA_MODEL) rather than editing this file.
+ollama:
+  base_url: http://localhost:11434
+  model: qwen2.5:14b-instruct
+  defaults:
+    options:
+      temperature: 0
+
 jev:
   base_url: https://api.typesafe.ai
   model: jev-latest
