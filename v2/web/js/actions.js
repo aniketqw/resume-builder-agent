@@ -132,6 +132,9 @@ export async function runImport(form) {
     set({
       importJob: null,
       github: { ...state.github, result },
+      // A re-import into the same session produces new claims; force the
+      // Evidence tab to refetch rather than showing the previous import's.
+      repoGraph: { ...state.repoGraph, sessionId: null },
     }, { silent: true });
     render();
     await Promise.all([refreshPaper(), hasTarget() ? refreshBase() : null]);
@@ -151,6 +154,31 @@ function updateProgress() {
   const label = document.querySelector('#ghBox .progress + .note');
   if (bar) bar.style.width = `${Math.round((job?.fraction ?? 0) * 100)}%`;
   if (label) label.textContent = job?.message ?? '';
+}
+
+/** Fetch the Evidence & Call-Graph tab's data, once per session.
+ *
+ *  Not folded into `adopt()`: an import's result already carries everything
+ *  the simulator needs, and most sessions never open this tab, so fetching
+ *  it eagerly on every document load would be a wasted request almost
+ *  every time.
+ */
+export async function loadRepoGraph({ force = false } = {}) {
+  if (!state.sessionId) return;
+  if (!force && state.repoGraph.sessionId === state.sessionId) return;
+  set({ repoGraph: { ...state.repoGraph, loading: true } }, { silent: true });
+  render();
+  try {
+    const { repos } = await api.repoGraph(state.sessionId);
+    const selectedRepo = state.repoGraph.selectedRepo in repos
+      ? state.repoGraph.selectedRepo
+      : Object.keys(repos)[0] ?? '';
+    set({ repoGraph: { sessionId: state.sessionId, loading: false, repos, selectedRepo } });
+  } catch (error) {
+    set({ repoGraph: { ...state.repoGraph, loading: false } }, { silent: true });
+    reportError(error, 'evidence');
+    render();
+  }
 }
 
 export async function refreshPaper() {

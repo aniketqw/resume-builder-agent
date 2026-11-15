@@ -65,8 +65,13 @@ export function methodView() {
         <p class="note">${meta.notes.deltas}</p>
       </div>
       <div class="box">
-        <h2>A limit worth knowing</h2>
+        <h2>How the dense channel reads a whole resume</h2>
         <p class="note">${meta.notes.truncation}</p>
+        ${raw(meta.notes.chunking
+          ? html`<details class="more"><summary>Why chunk-and-pool, not a bigger model</summary>
+              <div class="body"><p class="note">${meta.notes.chunking}</p></div>
+            </details>`
+          : '')}
       </div>
     </div>
   </div>`;

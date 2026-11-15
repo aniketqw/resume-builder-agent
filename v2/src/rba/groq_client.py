@@ -60,6 +60,23 @@ class EmptyContentError(GroqError):
     """200 OK but `content` was empty — almost always the reasoning trap."""
 
 
+class SchemaRejectedError(GroqError):
+    """Groq's own strict json-schema enforcement rejected the generation as
+    the wrong *shape* -- a missing required field, a wrong type -- not a
+    response that ran out of room. Both failure modes share the API's
+    `json_validate_failed` code, but only one of them is fixed by a bigger
+    `max_tokens`; this one needs the model told what it got wrong, the same
+    repair `structured()` already applies to a client-side
+    `pydantic.ValidationError`. Carries the raw bad generation (when Groq's
+    error body includes one) so that repair can show the model its own
+    prior answer, not just describe the problem abstractly.
+    """
+
+    def __init__(self, message: str, failed_generation: str = "") -> None:
+        super().__init__(message)
+        self.failed_generation = failed_generation
+
+
 @dataclass
 class Usage:
     prompt_tokens: int = 0
@@ -205,13 +222,33 @@ class GroqClient:
                 # comes back as a 400, not a truncated 200. Retrying with a
                 # larger budget is the documented fix, so do that rather than
                 # surfacing it as a hard failure.
-                if ("json_validate_failed" in body_text
-                        or "max completion tokens reached" in body_text):
+                if "max completion tokens reached" in body_text:
                     if body["max_tokens"] < 8192:
                         body["max_tokens"] = min(int(body["max_tokens"] * 2), 8192)
                         log.info("schema truncated on %s; retrying with max_tokens=%d",
                                  model, body["max_tokens"])
                         continue
+                    raise GroqError(f"{resp.status_code}: {body_text[:500]}")
+                # A *different* 400 shares the same `json_validate_failed`
+                # code: the model generated the wrong shape entirely (e.g. a
+                # claim missing its required `text` field), not a truncated
+                # one. Growing `max_tokens` does nothing for this -- the
+                # model needs to be told what it got wrong, which is
+                # `structured()`'s job, not this method's. Measured live:
+                # without this distinction, `complete()` retried this case by
+                # blindly doubling `max_tokens` up to five times with an
+                # unchanged prompt, which rarely corrects a genuine shape
+                # violation and burned the whole retry budget before raising
+                # anyway -- three real repo imports failed exactly this way.
+                if "json_validate_failed" in body_text:
+                    failed_generation = ""
+                    try:
+                        failed_generation = (resp.json().get("error") or {}).get(
+                            "failed_generation", "")
+                    except Exception:
+                        pass
+                    raise SchemaRejectedError(
+                        f"{resp.status_code}: {body_text[:500]}", failed_generation)
                 raise GroqError(f"{resp.status_code}: {body_text[:500]}")
 
             data = resp.json()
@@ -253,13 +290,35 @@ class GroqClient:
                          node: str | None = None, tier: str | None = None,
                          model: str | None = None, cache_key: str | None = None,
                          **overrides) -> tuple[T, Usage]:
-        """Return a validated Pydantic object. Retries once on a validation failure."""
+        """Return a validated Pydantic object. Retries once on a validation failure.
+
+        Two distinct failure modes both end up here, and both get the same
+        repair: show the model its own bad answer, plus what was wrong with
+        it, and ask again. A client-side `ValidationError` means Groq
+        returned 200 but the content doesn't fit `schema`; a
+        `SchemaRejectedError` means Groq's own strict-mode validation
+        rejected the generation server-side before `complete()` could even
+        return a `Result` -- see that exception's docstring for why
+        `complete()` cannot repair this one itself.
+        """
         last: Exception | None = None
         total = Usage()
         for attempt in range(2):
-            res = await self.complete(messages, node=node, tier=tier, model=model,
-                                      schema=schema, cache_key=cache_key if attempt == 0 else None,
-                                      **overrides)
+            try:
+                res = await self.complete(messages, node=node, tier=tier, model=model,
+                                          schema=schema, cache_key=cache_key if attempt == 0 else None,
+                                          **overrides)
+            except SchemaRejectedError as exc:
+                last = exc
+                messages = [
+                    *messages,
+                    {"role": "assistant", "content": exc.failed_generation or "(no content)"},
+                    {"role": "user",
+                     "content": f"That did not match the schema: {exc}. "
+                                "Return only valid JSON matching the schema, "
+                                "with every required field present."},
+                ]
+                continue
             total = total + res.usage
             try:
                 return schema.model_validate_json(res.content), total

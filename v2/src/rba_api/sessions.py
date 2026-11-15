@@ -82,6 +82,9 @@ class Session:
     claims: list = field(default_factory=list)
     pathways: dict = field(default_factory=dict)
     stats: dict = field(default_factory=dict)
+    #: path -> `RepoBrain`, one per repo imported, for the Evidence tab's
+    #: call-graph panel (see `rba.repobrain`).
+    repo_graph: dict = field(default_factory=dict)
 
     dense_cache: DenseCache = field(default_factory=DenseCache)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)

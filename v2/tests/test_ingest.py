@@ -12,10 +12,12 @@ import pytest
 
 from rba.resume.document import KeyValues, Table
 from rba.resume.ingest import (
+    _pick_table,
     _split_label,
     looks_like_bits,
     parse_bits,
     parse_resume,
+    read_pdf_tables,
 )
 
 FIXTURE = pathlib.Path(__file__).parent.parent / "fixtures" / "aniket_bits.txt"
@@ -250,3 +252,170 @@ def test_a_bullet_ending_in_a_date_does_not_become_a_heading(line):
 
     assert not _is_heading(line)
     assert _is_heading("CodeAct Fine-tuning with Execution Feedback | X Nov 2025")
+
+
+# ---------------------------------------------------------- pdfplumber path --
+# `pypdf`'s flat `extract_text()` is reading-order dependent: it happens to
+# preserve this fixture's table correctly (see `test_academic_table_recovers_
+# all_six_columns` above), but that is not guaranteed for every PDF producer
+# -- a live import saw exactly this fragility break (headers and values
+# landing in the wrong `Table` cells entirely). These tests reproduce the
+# general bug *class* -- a scrambled, column-major-ish extraction order --
+# rather than the user's exact original PDF bytes, which were not available
+# to build a fixture from; see `PLAN_PIPELINE_FIXES.md` Fix 3 for why that is
+# the honest thing to say about this test's provenance.
+
+#: What a badly-ordered PDF extraction can plausibly produce: each header
+#: and value on its own line instead of one line per table row. Reproduced
+#: directly below (`test_the_old_heuristic_mishandles_a_scrambled_extraction`)
+#: to prove this is a real failure mode of the text-only path, not a
+#: hypothetical one.
+_SCRAMBLED_ACADEMIC_TABLE = """ACADEMIC DETAILS
+COURSE
+SPECIALIZATION
+INSTITUTE/COLLEGE
+BOARD/UNIVERSITY
+SCORE
+YEAR
+UG
+CSE (AI AND MACHINE LEARNING)
+VIT Amravati
+VIT
+8.71 CGPA
+2025
+TECHNICAL SKILLS
+Languages Python
+"""
+
+
+def _bordered_academic_table_pdf() -> bytes:
+    """A real PDF with an actual ruled grid -- built with `fpdf2` (already a
+    project dependency) rather than loaded from a file no one has, so this
+    test is fully reproducible without external fixtures."""
+    from fpdf import FPDF
+
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 8)
+    headers = ["COURSE", "SPECIALIZATION", "INSTITUTE/COLLEGE",
+              "BOARD/UNIVERSITY", "SCORE", "YEAR"]
+    col_w = 32
+    for h in headers:
+        pdf.cell(col_w, 8, h, border=1)
+    pdf.ln()
+    pdf.set_font("Helvetica", "", 8)
+    for cell in ["UG", "AI/ML", "VIT Amravati", "VIT", "8.71 CGPA", "2025"]:
+        pdf.cell(col_w, 8, cell, border=1)
+    pdf.ln()
+    return bytes(pdf.output())
+
+
+def test_the_old_heuristic_mishandles_a_scrambled_extraction():
+    """Proves the failure mode this fix addresses is real: a plausible
+    column-major-ish extraction order defeats `_parse_table`'s row-boundary
+    heuristic (it has no page geometry to fall back on), producing a
+    one-column `Table` with every value split across the wrong cells --
+    structurally the same shape the live import's broken render showed."""
+    doc = parse_bits(_SCRAMBLED_ACADEMIC_TABLE)
+    body = section(doc, "ACADEMIC DETAILS").body
+    assert body.headers == ["COURSE"], \
+        "sanity check: the heuristic really does fail on this input"
+
+
+def test_pdfplumber_recovers_the_table_a_scrambled_extraction_loses():
+    """The fix: when a pdfplumber-detected grid matches this section's
+    known header tokens, it is used directly instead of the text heuristic
+    -- so the *same* scrambled flat text that the test above shows breaks
+    `_parse_table` now still produces a correct `Table`, because the real
+    table geometry came from the PDF's page layout, not from guessing at
+    reordered text."""
+    grids = read_pdf_tables(_bordered_academic_table_pdf())
+    assert len(grids) == 1
+
+    doc = parse_bits(_SCRAMBLED_ACADEMIC_TABLE, detected_tables=grids)
+    body = section(doc, "ACADEMIC DETAILS").body
+    assert body.headers == ["COURSE", "SPECIALIZATION", "INSTITUTE/COLLEGE",
+                            "BOARD/UNIVERSITY", "SCORE", "YEAR"]
+    assert body.rows == [["UG", "AI/ML", "VIT Amravati", "VIT", "8.71 CGPA", "2025"]]
+
+
+def _academic_table_pdf_with_merged_heading() -> bytes:
+    """A real live-upload failure, reproduced: pdfplumber frequently groups
+    a section's own heading line into the *same* detected table as the
+    header row directly below it, when nothing in the PDF's geometry
+    visually separates them (confirmed against the user's actual resume
+    upload, not guessed). `grid[0]` is then the heading, not the header
+    row `_pick_table` needs to match against."""
+    from fpdf import FPDF
+
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 7)
+    col_w = 32
+    pdf.cell(col_w * 6, 8, "ACADEMIC DETAILS", border=1)
+    pdf.ln()
+    headers = ["COURSE", "SPECIALIZATION", "INSTITUTE/COLLEGE",
+              "BOARD/UNIVERSITY", "SCORE", "YEAR"]
+    for h in headers:
+        pdf.cell(col_w, 8, h, border=1)
+    pdf.ln()
+    pdf.set_font("Helvetica", "", 7)
+    for cell in ["UG", "AI/ML", "VIT Amravati", "VIT", "8.71 CGPA", "2025"]:
+        pdf.cell(col_w, 8, cell, border=1)
+    pdf.ln()
+    return bytes(pdf.output())
+
+
+def test_pdfplumber_recovers_the_table_when_a_heading_is_merged_into_it():
+    """The live bug this plan's Fix 3 missed on its first pass: the
+    original synthetic test built a table with no heading row above it, so
+    `_pick_table` checking only `grid[0]` happened to work there -- but a
+    real resume's PDF merges the section heading into the same detected
+    grid, and the first fix silently fell back to the broken text
+    heuristic for every real upload as a result. `_pick_table` must search
+    a few leading rows, not assume row 0 is always the header."""
+    grids = read_pdf_tables(_academic_table_pdf_with_merged_heading())
+    assert len(grids) == 1
+    assert grids[0][0] == ["ACADEMIC DETAILS", "", "", "", "", ""], \
+        "sanity check: the heading really is merged in as row 0"
+
+    doc = parse_bits(_SCRAMBLED_ACADEMIC_TABLE, detected_tables=grids)
+    body = section(doc, "ACADEMIC DETAILS").body
+    assert body.headers == ["COURSE", "SPECIALIZATION", "INSTITUTE/COLLEGE",
+                            "BOARD/UNIVERSITY", "SCORE", "YEAR"]
+    assert body.rows == [["UG", "AI/ML", "VIT Amravati", "VIT", "8.71 CGPA", "2025"]]
+
+
+def test_pick_table_will_not_steal_an_unrelated_grid():
+    """A detected grid that doesn't look like an academic-details header
+    row must not be forced onto this section -- that would silently invent
+    structure just as badly as the heuristic it's replacing."""
+    unrelated_grid = [["Skill", "Years"], ["Python", "5"]]
+    assert _pick_table([unrelated_grid], {"COURSE", "SPECIALIZATION"}) is None
+
+
+def test_parse_resume_detects_tables_from_real_pdf_bytes():
+    """The actual entry point a browser upload goes through: `parse_resume`
+    must call `read_pdf_tables` itself when the upload is a PDF, not require
+    a caller to do it."""
+    pdf_bytes = _bordered_academic_table_pdf()
+    # A minimal but real one-page BITS-shaped text body so `looks_like_bits`
+    # recognises the format -- `parse_resume` only extracts *text* via
+    # pypdf from these bytes (the fpdf2 PDF above), so build the matching
+    # scrambled-table text directly rather than relying on pypdf's own
+    # extraction of a table this test doesn't actually need text for.
+    import rba.resume.ingest as ingest_module
+
+    original_read_pdf = ingest_module.read_pdf
+    try:
+        ingest_module.read_pdf = lambda data: (
+            "SUMMARY\nBuilds things.\n" + _SCRAMBLED_ACADEMIC_TABLE
+            + "\nPROJECTS\nThing - X\nJan 2025 - Present\nDid a thing.\n")
+        doc = parse_resume(pdf_bytes)
+    finally:
+        ingest_module.read_pdf = original_read_pdf
+
+    body = section(doc, "ACADEMIC DETAILS").body
+    assert body.headers == ["COURSE", "SPECIALIZATION", "INSTITUTE/COLLEGE",
+                            "BOARD/UNIVERSITY", "SCORE", "YEAR"], \
+        "parse_resume must thread pdfplumber's detected grid through on its own"

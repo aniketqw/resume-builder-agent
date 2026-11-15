@@ -12,6 +12,7 @@ from rba.github_tools import (
     MCP_TOOLS,
     McpBackend,
     RestBackend,
+    _is_permanent_error,
     _is_session_error,
     _unwrap,
 )
@@ -107,6 +108,70 @@ async def test_read_only_toolset_connects(monkeypatch):
     monkeypatch.setattr(lcmcp, "MCPAdapter", lambda target: Adapter())
     await b.connect()
     assert b.has_tool("file") and not b.has_tool("tree")
+
+
+async def test_connect_disables_the_tool_level_error_swallow(monkeypatch):
+    """`langchain.mcp` wires every tool with `handle_tool_error` set, which
+    converts a server-reported failure (`isError=True`) into normal-looking
+    text content instead of raising -- our code has no model in the loop to
+    notice the "content" is actually an error message. A live run produced
+    exactly this: a bad commit ref returned its error text as if it were a
+    file's contents, which `prepare_evidence` then tried to parse as Python
+    and reported a syntax error on every single file. `connect()` must turn
+    this off for every tool so a real failure raises instead."""
+    b = McpBackend(config=Config.load(), token="t", mode="remote")
+
+    class Adapter:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def list_tools(self):
+            return [FakeTool(n) for n in
+                    ("get_file_contents", "list_commits", "search_repositories")]
+
+    monkeypatch.setattr(lcmcp, "MCPAdapter", lambda target: Adapter())
+    await b.connect()
+    assert all(t.handle_tool_error is False for t in b._tools.values())
+
+
+# -- permanent vs. retryable failures -------------------------------------
+@pytest.mark.parametrize("msg", [
+    'failed to resolve git reference: could not resolve ref "abc123" as a branch or a tag',
+    "404: Not Found",
+    "no such file or directory",
+])
+def test_known_permanent_failures_are_recognised(msg):
+    """Seen live: a 10-char abbreviated commit SHA fails to resolve against
+    the hosted GitHub MCP server's get_file_contents, with exactly this
+    message -- retrying cannot change that outcome."""
+    assert _is_permanent_error(RuntimeError(msg))
+
+
+def test_a_transient_network_error_is_not_permanent():
+    assert not _is_permanent_error(RuntimeError("connection reset by peer"))
+    assert not _is_permanent_error(None)
+
+
+async def test_permanent_error_fails_fast_without_wasting_retries(monkeypatch):
+    """A guaranteed-to-repeat failure must not pay the full retry/backoff
+    budget (up to ~3.5s across 3 attempts) -- it fails on the first try."""
+    import asyncio as asyncio_mod
+
+    b = McpBackend(config=Config.load(), token="t", mode="remote")
+    tool = FakeTool("get_file_contents", result=RuntimeError(
+        'failed to resolve git reference: could not resolve ref "x" as a branch or a tag'))
+    b._tools = {"get_file_contents": tool}
+
+    sleeps = []
+
+    async def fake_sleep(delay):
+        sleeps.append(delay)
+
+    monkeypatch.setattr(asyncio_mod, "sleep", fake_sleep)
+
+    with pytest.raises(RuntimeError, match="failed after 1 attempt"):
+        await b._call("file", owner="o", repo="r", path="p")
+    assert len(tool.calls) == 1, "must not retry a permanent failure"
+    assert sleeps == [], "must not sleep/backoff before giving up"
 
 
 # -- target construction --------------------------------------------------

@@ -50,6 +50,13 @@ class Candidate:
     id: str
     text: str
     skills: list[str] = field(default_factory=list)
+    # (chunk_id, chunk_text) pairs from `resume.chunking.document_chunks`.
+    # Opt-in: `None` (the default) is the original behaviour -- `text` is
+    # embedded as one truncated blob. When set, the dense channel instead
+    # embeds each chunk once and pools them, so the whole document -- not
+    # just the first ~512 tokens -- contributes to the dense score. See
+    # docs/literature-survey.md §8.1.
+    chunks: tuple[tuple[str, str], ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -89,16 +96,21 @@ class BatchStats:
 
 
 class DenseCache:
-    """A bounded (jd_key, token_prefix) -> cosine memo.
+    """A bounded (jd_key, token_prefix) -> cosine memo, plus a bounded
+    chunk_id -> embedding memo for chunked candidates.
 
-    Keyed on the *truncated token ids*, not the text, so two documents that the
-    model cannot tell apart share an entry. Bounded because a long editing
-    session would otherwise grow it without limit.
+    The first is keyed on the *truncated token ids*, not the text, so two
+    documents that the model cannot tell apart share an entry. The second is
+    keyed on `chunk_id` alone: a chunk id already encodes its own content (via
+    the enabled bullet ids that built it -- see `resume.chunking`), so the
+    same id always means the same text. Both bounded because a long editing
+    session would otherwise grow them without limit.
     """
 
     def __init__(self, maxsize: int = 4096) -> None:
         self.maxsize = maxsize
         self._data: OrderedDict[tuple, float] = OrderedDict()
+        self._chunks: OrderedDict[str, np.ndarray] = OrderedDict()
 
     def get(self, key: tuple) -> float | None:
         if key not in self._data:
@@ -112,8 +124,94 @@ class DenseCache:
         while len(self._data) > self.maxsize:
             self._data.popitem(last=False)
 
+    def get_chunk(self, chunk_id: str) -> np.ndarray | None:
+        if chunk_id not in self._chunks:
+            return None
+        self._chunks.move_to_end(chunk_id)
+        return self._chunks[chunk_id]
+
+    def put_chunk(self, chunk_id: str, vector: np.ndarray) -> None:
+        self._chunks[chunk_id] = vector
+        self._chunks.move_to_end(chunk_id)
+        while len(self._chunks) > self.maxsize:
+            self._chunks.popitem(last=False)
+
     def __len__(self) -> int:
         return len(self._data)
+
+
+def _ensure_chunks_embedded(
+        chunk_sets: list[tuple[tuple[str, str], ...]],
+        cache: DenseCache | None) -> dict[str, np.ndarray] | None:
+    """One batched `embed()` call for every distinct chunk across every
+    *chunk set passed in this call* that is not already cached -- not one
+    call per candidate.
+
+    This is the whole reason `score_many` can afford a 145-variant sweep in
+    the first place ("one batch of twenty-one costs far less than twenty-one
+    calls of one", see the module docstring); a first version of this
+    function called `embed()` once per candidate and measured *slower* than
+    the plain whole-document path it was meant to replace on a real 15-bullet
+    resume (1,473 ms vs 1,269 ms) -- entirely because of that, not because
+    chunking itself is more expensive. Collecting every candidate's missing
+    chunks first and embedding them in one call fixes it.
+
+    `_dense_values` calls this **twice** -- once for the first chunked
+    candidate alone, once for the rest batched together -- not because that
+    optimisation stopped mattering, but because embedding the same chunk
+    alongside different batch-mates is not bit-exact (see the comment at that
+    call site). Splitting the call in two trades a little of this batching
+    for a reproducibility guarantee the test suite depends on.
+    """
+    local: dict[str, np.ndarray] = {}
+    missing: dict[str, str] = {}
+    for chunks in chunk_sets:
+        for chunk_id, text in chunks:
+            if chunk_id in local or chunk_id in missing:
+                continue
+            vector = cache.get_chunk(chunk_id) if cache is not None else None
+            if vector is not None:
+                local[chunk_id] = vector
+            else:
+                missing[chunk_id] = text
+    if missing:
+        ids = list(missing)
+        vectors = embed([missing[cid] for cid in ids])
+        if vectors is None:
+            return None
+        for chunk_id, vector in zip(ids, vectors, strict=True):
+            local[chunk_id] = vector
+            if cache is not None:
+                cache.put_chunk(chunk_id, vector)
+    return local
+
+
+def _pool_from_vectors(chunks: tuple[tuple[str, str], ...],
+                       vectors_by_id: dict[str, np.ndarray]) -> np.ndarray | None:
+    """Length-weighted mean of this candidate's chunk vectors, re-normalised
+    to unit length so cosine similarity against the job description stays
+    meaningful.
+
+    Mean-pooling, not max-pooling: every other channel in this scorer
+    (lexical, skills) already judges the *whole* document, and this keeps
+    the dense channel consistent with that rather than picking a single
+    "best" chunk -- which would be exactly the kind of invented, unvalidated
+    weighting this scorer otherwise avoids. There is no ranking ground truth
+    in this repository to choose between them empirically (see
+    docs/literature-survey.md §9), so this follows the already-justified
+    precedent instead of guessing.
+    """
+    if not chunks:
+        return None
+    weights = np.array([len(text) for _, text in chunks], dtype=np.float32)
+    weights = weights / weights.sum()
+    try:
+        ordered = np.stack([vectors_by_id[cid] for cid, _ in chunks])
+    except KeyError:
+        return None
+    pooled = (ordered * weights[:, None]).sum(axis=0, keepdims=True)
+    norm = np.linalg.norm(pooled, axis=1, keepdims=True)
+    return (pooled / np.clip(norm, 1e-9, None))[0]
 
 
 def _dense_values(candidates: list[Candidate], jd_text: str,
@@ -125,42 +223,89 @@ def _dense_values(candidates: list[Candidate], jd_text: str,
     treats as genuinely unknown and redistributes -- not as zero.
     """
     none_result: list[float | None] = [None] * len(candidates)
-    texts = [c.text for c in candidates]
-    if not any(t.strip() for t in texts):
+    if not any(c.text.strip() for c in candidates):
         return none_result
 
     jd_vector = _jd_array(jd_text)
     if jd_vector is None:
         return none_result
 
+    values: list[float | None] = [None] * len(candidates)
+
+    # Chunked candidates (opted in via Candidate.chunks) use the pooled path;
+    # everyone else keeps the original whole-text truncation-dedup path
+    # below, completely unchanged.
+    chunked = [i for i, c in enumerate(candidates) if c.chunks]
+    flat = [i for i in range(len(candidates)) if i not in chunked]
+
+    if chunked:
+        # The FIRST chunked candidate is embedded in its own dedicated call,
+        # separate from every other candidate's chunks -- not merged into one
+        # big batch with them.
+        #
+        # This looks like it undoes the "one batched call" optimisation, but
+        # it fixes a real bug: the same chunk embedded alongside DIFFERENT
+        # batch-mates (i.e. in a differently-padded batch) is not bit-exact.
+        # Measured directly: a document's own score, computed alone, differed
+        # from the same document's score computed as the base of a 5-variant
+        # `attribute()` sweep by a reproducible (not random) ~4.3e-08 at the
+        # vector level -- identical across 10 repeated trials, so it is a
+        # floating-point padding artefact, not noise. That is small enough to
+        # never matter for a displayed score, but large enough to break
+        # `test_score_equals_rescore_exactly`'s `==` (not approximate)
+        # assertion, because `rescore()` always embeds a document's chunks
+        # alone while `attribute()`'s sweep embeds the same document's chunks
+        # alongside its own leave-one-out variants. Embedding candidate 0 (by
+        # convention, always "the document as it currently stands" --
+        # `attribute`/`score_batch` always put it first) in isolation makes
+        # that score reproducible regardless of what else is being scored in
+        # the same request. The remaining chunked candidates (variants) still
+        # share one batched call among themselves, so the sweep stays fast.
+        base_index = chunked[0]
+        base_vectors = _ensure_chunks_embedded([candidates[base_index].chunks], cache)
+        rest_vectors = (_ensure_chunks_embedded(
+            [candidates[i].chunks for i in chunked[1:]], cache)
+            if len(chunked) > 1 else {})
+        vectors_by_id = None
+        if base_vectors is not None and rest_vectors is not None:
+            vectors_by_id = {**base_vectors, **rest_vectors}
+        if vectors_by_id is not None:
+            for index in chunked:
+                vector = _pool_from_vectors(candidates[index].chunks, vectors_by_id)
+                if vector is not None:
+                    values[index] = max(0.0, float(np.dot(vector, jd_vector)))
+
+    if not flat:
+        return values
+
+    texts = [candidates[i].text for i in flat]
     prefixes = truncated_ids(texts)
     if prefixes is None:          # model unavailable; degrade, do not fail
-        return none_result
+        return values if chunked else none_result
 
     jd_key = hash(jd_text)
-    values: list[float | None] = [None] * len(candidates)
 
     # Which distinct prefixes still need embedding, and who is waiting on each.
     pending: OrderedDict[tuple, list[int]] = OrderedDict()
-    for index, prefix in enumerate(prefixes):
+    for local_i, prefix in zip(flat, prefixes, strict=True):
         key = (jd_key, prefix)
         hit = cache.get(key) if cache is not None else None
         if hit is not None:
-            values[index] = hit
+            values[local_i] = hit
             stats.dense_cache_hits += 1
         else:
-            pending.setdefault(prefix, []).append(index)
+            pending.setdefault(prefix, []).append(local_i)
 
     stats.unique_prefixes = len(pending)
     if not pending:
         return values
 
     # One text per distinct prefix, in one call.
-    unique_texts = [texts[holders[0]] for holders in pending.values()]
+    unique_texts = [candidates[holders[0]].text for holders in pending.values()]
     stats.embedded = len(unique_texts)
     vectors = embed(unique_texts)
     if vectors is None:
-        return none_result
+        return values
 
     for (prefix, holders), vector in zip(pending.items(), vectors, strict=True):
         cosine = max(0.0, float(np.dot(vector, jd_vector)))

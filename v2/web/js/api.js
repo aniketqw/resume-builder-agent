@@ -67,6 +67,7 @@ export const api = {
   startImport: (id, body) => request(`/api/session/${id}/github`,
     { method: 'POST', body }),
   job: (jobId) => request(`/api/jobs/${jobId}`),
+  repoGraph: (id) => request(`/api/session/${id}/repo-graph`),
 
   /** Follow a job to completion. `onProgress(message, fraction)` fires per
    *  checkpoint; resolves with the job's result, rejects on error. */

@@ -8,6 +8,8 @@ function they decorate/enclose.
 """
 from __future__ import annotations
 
+import json
+
 from rba.repobrain import index, symbol_at_line
 
 ROUTES_PY = '''
@@ -58,6 +60,30 @@ def test_non_python_and_unparsable_files_are_reported_not_dropped():
     gaps = dict(g.split(": ", 1) for g in brain.partial_source)
     assert "README.md" in gaps and "non-Python" in gaps["README.md"]
     assert "broken.py" in gaps and "SyntaxError" in gaps["broken.py"]
+
+
+def test_to_dict_is_json_serialisable_and_carries_the_real_structure():
+    """The Evidence tab's API response is `RepoBrain.to_dict()` -- if this
+    isn't plain JSON-safe data, the endpoint that serves it is broken."""
+    brain = _demo_brain()
+    payload = brain.to_dict()
+    encoded = json.dumps(payload)  # raises if anything isn't JSON-safe
+    decoded = json.loads(encoded)
+
+    assert set(decoded.keys()) == {"files", "partial_source"}
+    routes_file = decoded["files"]["app/routes.py"]
+    assert {"path", "symbols", "calls", "routes", "parse_error"} <= routes_file.keys()
+
+    symbol_names = {s["name"] for s in routes_file["symbols"]}
+    assert {"_resolve", "score_one", "inner"} <= symbol_names
+
+    route = routes_file["routes"][0]
+    assert route["method"] == "POST"
+    assert route["pattern"] == "/api/score"
+    assert route["handler"] == "app/routes.py::score_one"
+
+    call_names = {c["callee"] for c in routes_file["calls"]}
+    assert "_resolve" in call_names
     # broken.py is still a known (.py) file -- just one with no usable
     # symbols -- while README.md, not being Python, is never indexed at all.
     assert brain.files["broken.py"].symbols == []

@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Request
 from rba.ats.batch import BatchStats, Candidate, score_many
 from rba.ats.fusion import CHANNEL_WEIGHTS, ordinal_band
 from rba.resume.attribution import attribute
+from rba.resume.chunking import document_chunks
 from rba.resume.document import ResumeDoc
 from rba.resume.role_target import target_for_key
 from rba.resume.selection import UnknownTarget, apply_ops, signature
@@ -101,7 +102,8 @@ async def score_one(request: Request, body: ScoreRequest) -> dict:
     session, doc, (jd, required, preferred, synthetic) = _resolve(request, body)
     cache = session.dense_cache if session is not None else None
 
-    candidates = [Candidate(id="base", text=doc.as_text(), skills=doc.skills())]
+    candidates = [Candidate(id="base", text=doc.as_text(), skills=doc.skills(),
+                           chunks=tuple(document_chunks(doc)))]
     scored = await state.pools.score(
         score_many, candidates, jd, required_skills=required,
         preferred_skills=preferred, use_dense=body.use_dense, cache=cache)
@@ -138,8 +140,13 @@ async def score_batch(request: Request, body: BatchScoreRequest) -> dict:
     except UnknownTarget as exc:
         raise HTTPException(422, f"base_ops: {exc}") from None
 
+    # The base MUST be `candidates[0]` -- `_dense_values` embeds the first
+    # chunked candidate in its own dedicated call specifically so "the
+    # document as it stands" is bit-exact-reproducible regardless of how many
+    # variants are swept alongside it (see ats/batch.py's comment there).
     candidates = [Candidate(id="\x00base", text=base_doc.as_text(),
-                            skills=base_doc.skills())]
+                            skills=base_doc.skills(),
+                            chunks=tuple(document_chunks(base_doc)))]
     keys: list[str] = []
     for variant in body.variants:
         try:
@@ -149,7 +156,8 @@ async def score_batch(request: Request, body: BatchScoreRequest) -> dict:
         except ValueError as exc:
             raise HTTPException(400, f"variant {variant.key!r}: {exc}") from None
         candidates.append(Candidate(id=variant.key, text=patched.as_text(),
-                                    skills=patched.skills()))
+                                    skills=patched.skills(),
+                                    chunks=tuple(document_chunks(patched))))
         keys.append(variant.key)
 
     stats = BatchStats()

@@ -1,11 +1,13 @@
 from rba.config import Config
 from rba.nodes.fetch import (
     SOURCE_FILE_LIMIT,
+    SOURCE_FILE_MAX_CHARS,
     _interesting_paths,
     _ranked_source_paths,
     extract_dependencies,
     fetch_repo_facts,
 )
+from rba.repobrain import index
 from rba.state import RepoRef
 
 
@@ -89,6 +91,43 @@ async def test_readme_is_truncated_to_the_configured_budget():
     backend = StubBackend(["README.md"], [], {"README.md": "x" * (limit * 3)})
     facts = await fetch_repo_facts(backend, RepoRef(name="big"), "me", cfg)
     assert len(facts.readme) == limit, "prompt budget must be bounded"
+
+
+async def test_a_long_source_file_still_parses_after_fetch():
+    """Live bug: `fetch_repo_facts` used to truncate every source file to
+    4000 characters before `repobrain.index()` ever saw it, so a file
+    longer than that got cut off mid-token -- a guaranteed `SyntaxError`
+    that had nothing to do with the code's real quality. This builds a file
+    long enough to have been cut mid-string-literal at the old 4000-char
+    cutoff and confirms it survives indexing whole."""
+    padding = "\n".join(f"# comment line {i}" for i in range(400))  # ~6,800 chars
+    assert len(padding) > 4000, "fixture must actually exceed the old cutoff"
+    source = (
+        f'{padding}\n\n'
+        'def build_thing():\n'
+        '    message = "this closing quote used to land past the old cutoff"\n'
+        '    return message\n'
+    )
+    backend = StubBackend(
+        tree=["src/app.py"], commits=[], files={"src/app.py": source})
+    facts = await fetch_repo_facts(backend, RepoRef(name="demo"), "me", Config.load())
+
+    assert facts.source_files["src/app.py"] == source, \
+        "the full file must be kept for AST indexing, not cut to the old 4000-char cap"
+    brain = index(facts.source_files)
+    assert brain.partial_source == [], f"should parse cleanly: {brain.partial_source}"
+    assert brain.symbol("build_thing"), "the function past the old cutoff must be indexed"
+
+
+async def test_a_pathological_file_is_still_bounded():
+    """The new cap is generous (see `fetch.py`'s docstring for why), not
+    unbounded -- a single huge generated/vendored file must not blow up
+    `AgentState` without limit."""
+    backend = StubBackend(
+        tree=["src/huge.py"], commits=[],
+        files={"src/huge.py": "x = 1\n" * 100_000})
+    facts = await fetch_repo_facts(backend, RepoRef(name="demo"), "me", Config.load())
+    assert len(facts.source_files["src/huge.py"]) == SOURCE_FILE_MAX_CHARS
 
 
 def test_ranked_source_paths_are_python_only_and_bounded():

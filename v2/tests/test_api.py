@@ -56,6 +56,12 @@ def test_scoring_meta_publishes_the_real_weights(client):
     assert body["max_tokens"] == 512
     # The page must be able to explain truncation; it changes what a delta means.
     assert "truncation" in body["notes"]
+    # The dense channel now chunks instead of truncating (see
+    # `resume/chunking.py`) -- this note must say so, not repeat the old
+    # "lines past 512 tokens do not change the score" claim, which stopped
+    # being true and would otherwise mislead the "How the score works" tab.
+    assert "chunk" in body["notes"]["truncation"].lower()
+    assert "chunking" in body["notes"]
 
 
 def test_roles_come_from_roles_yaml(client):
@@ -185,10 +191,20 @@ def test_too_many_variants_is_refused(client, session):
 
 
 def test_attribution_matches_the_engine(client, session):
+    """The API's attribution and a direct `attribute()` call must agree to
+    within the measured floating-point floor, not necessarily to bit-
+    exactness: the API call reuses the session's (possibly already warm)
+    dense cache, while this direct call starts with none. A chunk's cached
+    vector was computed in whatever batch it first appeared in, which is not
+    guaranteed to match the batch shape of a from-scratch call -- see
+    `test_batch.py::test_dedup_matches_the_naive_path_with_dense_on` for the
+    measured ~4.3e-08 magnitude this accounts for. The per-bullet deltas are
+    already rounded to 4 decimals in the response and stay exact in practice.
+    """
     sid, doc = session
     body = client.post("/api/attribution", json={"session": sid}).json()
     expected = attribute(doc, JD)
-    assert body["raw_total"] == expected.raw_total
+    assert body["raw_total"] == pytest.approx(expected.raw_total, abs=1e-6)
     got = [(i["bullet_id"], i["delta"]) for i in body["impacts"]]
     assert got == [(i.bullet_id, i.delta) for i in expected.impacts]
 

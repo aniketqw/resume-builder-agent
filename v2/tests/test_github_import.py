@@ -12,9 +12,11 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from rba.repobrain import index
 from rba.resume.document import Bullet, Entry, ResumeDoc, Section
 from rba.resume.merge import adopted, candidates
 from rba.resume.pipeline import ImportResult
+from rba.state import Claim, ClaimStatus, Evidence
 from rba_api.app import create_app
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
@@ -31,6 +33,22 @@ def fake_generated() -> ResumeDoc:
                                                        entries=[entry])])
 
 
+def fake_claims() -> list[Claim]:
+    return [
+        Claim(repo="octocat/cool-repo", text="Built a thing with 12 tests.",
+              status=ClaimStatus.VERIFIED,
+              evidence=[Evidence(path="app.py", quote="def build_thing():",
+                                repo="octocat/cool-repo", sha="abc123",
+                                line_start=1, line_end=1)]),
+        Claim(repo="octocat/cool-repo", text="Served a million requests a day.",
+              status=ClaimStatus.NEEDS_MEASURE, measure_hint="[MEASURE: traffic]"),
+    ]
+
+
+def fake_repo_graph() -> dict:
+    return {"octocat/cool-repo": index({"app.py": "def build_thing():\n    pass\n"})}
+
+
 def fake_result(stats=None) -> ImportResult:
     return ImportResult(
         doc=fake_generated(),
@@ -42,6 +60,8 @@ def fake_result(stats=None) -> ImportResult:
         repos=[_repo("cool-repo"), _repo("skipped-repo")],
         selected=[_repo("cool-repo")],
         excluded=[_repo("skipped-repo", "fork with no commits of yours")],
+        claims=fake_claims(),
+        repo_graph=fake_repo_graph(),
     )
 
 
@@ -162,6 +182,35 @@ def test_a_blank_username_is_refused(client, session):
 def test_an_unknown_session_is_404(client):
     assert client.post("/api/session/s_nope/github",
                        json={"username": "octocat"}).status_code == 404
+
+
+def test_repo_graph_reports_every_claim_status_and_the_code_index(client, session):
+    """Not just verified claims -- the Evidence tab exists to explain why an
+    unverified claim did *not* make it onto the resume, too."""
+    _run(client, session)
+    body = client.get(f"/api/session/{session}/repo-graph").json()
+    repo = body["repos"]["octocat/cool-repo"]
+    statuses = {c["status"] for c in repo["claims"]}
+    assert statuses == {"verified", "needs_measure"}
+
+    verified = next(c for c in repo["claims"] if c["status"] == "verified")
+    assert verified["evidence"][0]["permalink"] == (
+        "https://github.com/octocat/cool-repo/blob/abc123/app.py#L1")
+
+    unmeasured = next(c for c in repo["claims"] if c["status"] == "needs_measure")
+    assert unmeasured["evidence"] == []         # never had a permalink to begin with
+    assert unmeasured["measure_hint"] == "[MEASURE: traffic]"
+
+    assert repo["graph"]["files"]["app.py"]["symbols"][0]["name"] == "build_thing"
+
+
+def test_repo_graph_is_empty_for_a_session_that_never_imported(client, session):
+    body = client.get(f"/api/session/{session}/repo-graph").json()
+    assert body["repos"] == {}
+
+
+def test_repo_graph_on_an_unknown_session_is_404(client):
+    assert client.get("/api/session/s_nope/repo-graph").status_code == 404
 
 
 def test_imports_sharing_a_groq_key_share_the_same_limiter(monkeypatch):

@@ -66,6 +66,28 @@ def reasoning_trap_response(model: str = "openai/gpt-oss-20b") -> dict[str, Any]
     }
 
 
+def schema_rejected_response(failed_generation: str = '{"claims":[{"evidence":[]}]}'
+                             ) -> tuple[int, dict[str, Any]]:
+    """A real-shaped Groq 400: strict json-schema mode rejected the model's
+    own generation for being the wrong *shape*, not for running out of room.
+
+    Body shape reproduced from a live failure (claims objects missing their
+    required `text` field) -- same `code` as the max-tokens case, which is
+    exactly why `groq_client.py` has to read the `message`, not just the
+    `code`, to tell the two apart. See `SchemaRejectedError`.
+    """
+    return 400, {"error": {
+        "message": ("Generated JSON does not match the expected schema. "
+                    "Please adjust your prompt. See 'failed_generation' for "
+                    "more details. Error: jsonschema: '/claims/0' does not "
+                    "validate with /properties/claims/items/required: "
+                    "missing properties: 'text'"),
+        "type": "invalid_request_error",
+        "code": "json_validate_failed",
+        "failed_generation": failed_generation,
+    }}
+
+
 class FakeGroq:
     """Scripted Groq transport. Records every request body it sees."""
 

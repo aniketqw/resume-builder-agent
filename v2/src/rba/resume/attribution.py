@@ -140,21 +140,44 @@ def _score_from_parts(dense: float | None, text: str, jd_text: str,
 
 def rescore(doc: ResumeDoc, jd_text: str, *, required_skills: list[str] | None = None,
             preferred_skills: list[str] | None = None,
-            use_dense: bool = True) -> tuple[float, dict]:
+            use_dense: bool = True, cache=None) -> tuple[float, dict]:
     """Score the document as it currently stands.
 
-    One embedding of the whole document -- the job description's is cached, see
-    :func:`_jd_vector`. Measured on a real 662-word one-page resume: 291 ms,
-    down from 582 ms before the job description was split out of the batch.
+    The dense channel is chunked and length-weight-pooled
+    (`resume.chunking.document_chunks`), not embedded as one truncated blob --
+    a real one-page resume is ~1,150 tokens against the encoder's 512-token
+    ceiling, so truncation left ~56% of a resume invisible to this channel
+    (docs/literature-survey.md §8.1). Measured cost of chunking every
+    leave-one-out variant in `attribute()`'s sweep: 29-67% more wall time than
+    the old truncated path, depending on `RBA_EMBED_BATCH` -- accepted
+    deliberately, correctness over speed.
+
+    `rescore` and `score_many` must compute the dense channel identically
+    (the UI writes both to the same scorecard state -- see
+    `scoreclient.js:156` -- so disagreement would be a visible flicker, not a
+    rounding error), which is why both go through the same
+    `_ensure_chunks_embedded`/`_pool_from_vectors` pair. That alone is not
+    enough: the same chunk embedded alongside *different* batch-mates is not
+    bit-exact (measured: a reproducible ~4.3e-08 vector difference, a
+    floating-point batch-padding artefact, not noise) -- which would make a
+    document's score depend on what else was in the same `score_many` call.
+    `ats.batch._dense_values` embeds the first chunked candidate in its own
+    dedicated call for exactly this reason; see its comment there.
     """
     text = doc.as_text()
     corpus = list(background_corpus())
     dense = None
     if use_dense and text.strip():
+        from ..ats.batch import _ensure_chunks_embedded, _pool_from_vectors
+        from .chunking import document_chunks
+
         jd_vector = _jd_array(jd_text)
-        vectors = embed([text])
-        if vectors is not None and jd_vector is not None:
-            dense = max(0.0, float(np.dot(vectors[0], jd_vector)))
+        chunks = tuple(document_chunks(doc))
+        vectors_by_id = _ensure_chunks_embedded([chunks], cache)
+        vector = (_pool_from_vectors(chunks, vectors_by_id)
+                 if vectors_by_id is not None else None)
+        if vector is not None and jd_vector is not None:
+            dense = max(0.0, float(np.dot(vector, jd_vector)))
     raw, channels = _score_from_parts(
         dense, text, jd_text, doc.skills(),
         required_skills or [], preferred_skills or [], corpus)
@@ -178,17 +201,20 @@ def attribute(doc: ResumeDoc, jd_text: str, *,
     # batch module imports `_score_from_parts` from here, so there is still
     # exactly one fusion code path.
     from ..ats.batch import Candidate, score_many
+    from .chunking import document_chunks
 
     enabled = doc.enabled()
     required = required_skills or []
     preferred = preferred_skills or []
 
     full_text = doc.as_text()
-    candidates = [Candidate(id="", text=full_text, skills=doc.skills())]
+    candidates = [Candidate(id="", text=full_text, skills=doc.skills(),
+                           chunks=tuple(document_chunks(doc)))]
     for bullet in enabled:
         bullet.enabled = False
         candidates.append(Candidate(id=bullet.id, text=doc.as_text(),
-                                    skills=doc.skills()))
+                                    skills=doc.skills(),
+                                    chunks=tuple(document_chunks(doc))))
         bullet.enabled = True
 
     scored = score_many(candidates, jd_text, required_skills=required,

@@ -14,6 +14,7 @@ import pytest
 from rba.ats.batch import BatchStats, Candidate, DenseCache, score_many
 from rba.ats.dense import available, truncated_ids
 from rba.resume.attribution import rescore
+from rba.resume.chunking import document_chunks
 from rba.resume.ingest import parse_resume
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
@@ -123,7 +124,26 @@ def test_truncation_dedup_is_exact(doc):
 
 @pytest.mark.slow
 def test_dedup_matches_the_naive_path_with_dense_on(doc):
-    """The expensive proof: dedup on == dedup off, to float equality."""
+    """The expensive proof: a batched (chunked, cached) score agrees with an
+    independent `rescore()` of the same document, to within the measured
+    floating-point floor -- not to bit-exactness.
+
+    `rescore()` now always chunks (see `resume/attribution.py`), so this
+    compares two chunked computations, not a chunked one against a flat one.
+    It is *not* `==`, and that is a deliberate, measured choice: the same
+    chunk embedded alongside different batch-mates is not bit-exact (a
+    reproducible ~4.3e-08 vector-level difference from batch padding, not
+    noise -- see `test_chunking.py::test_base_candidate_is_bit_exact_regardless_of_batch_mates`).
+    `ats/batch.py`'s `_dense_values` isolates the FIRST chunked candidate's
+    embed call specifically so a document's own "base" score is always
+    reproducible (that is the property the UI actually needs — see that
+    test). It does not, and architecturally cannot without an ~80x slower
+    fixed-length-padding scheme (measured, rejected), make every OTHER
+    candidate in a shared batch bit-identical to a hypothetical "scored
+    completely alone" reference -- nothing in this app ever needs that,
+    since variant scores are only ever used as deltas against the SAME
+    batch's base, never compared standalone.
+    """
     if not available():
         pytest.skip("embedding model unavailable")
 
@@ -132,7 +152,8 @@ def test_dedup_matches_the_naive_path_with_dense_on(doc):
     for bullet in enabled:
         bullet.enabled = False
         candidates.append(Candidate(id=bullet.id, text=doc.as_text(),
-                                    skills=doc.skills()))
+                                    skills=doc.skills(),
+                                    chunks=tuple(document_chunks(doc))))
         bullet.enabled = True
 
     batched = score_many(candidates, JD, use_dense=True)
@@ -141,7 +162,8 @@ def test_dedup_matches_the_naive_path_with_dense_on(doc):
         bullet.enabled = False
         expected, _ = rescore(doc, JD, use_dense=True)
         bullet.enabled = True
-        assert scored.raw == expected, f"dedup changed the score for {candidate.id}"
+        assert scored.raw == pytest.approx(expected, abs=1e-6), \
+            f"dedup changed the score for {candidate.id} by more than the measured floating-point floor"
 
 
 # ------------------------------------------------------------------ cache --
