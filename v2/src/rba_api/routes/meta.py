@@ -48,10 +48,28 @@ async def scoring_meta() -> dict:
                 "and never as the score."
             ),
             "truncation": (
-                f"The embedding model reads at most {MAX_TOKENS} tokens, and a "
-                "full one-page resume is about 1,150. Lines past that cut do "
-                "not change the dense channel at all, so their delta reflects "
-                "the lexical and skills channels only."
+                f"The embedding model reads at most {MAX_TOKENS} tokens at a "
+                "time, and a full one-page resume is about 1,150 -- too long "
+                "for one pass. The dense channel no longer truncates the "
+                "document to fit: it splits the resume into its own "
+                "sections and entries, embeds each chunk separately (all "
+                "well under the limit), and combines them into one "
+                "length-weighted vector. Every line is read by the dense "
+                "channel now, not just the first page's worth."
+            ),
+            "chunking": (
+                "Why chunk-and-pool instead of one bigger model: mean-"
+                "pooling independently-embedded chunks is established "
+                "practice for long-document sentence-embedding matching. "
+                "The alternative -- embedding the whole document in one "
+                "pass before any splitting (\"late chunking\") -- needs a "
+                "long-context encoder, which would reopen the memory-"
+                "footprint tradeoff this project already settled by "
+                "choosing bge-small over a larger model (see "
+                "docs/literature-survey.md). The one measured cost: a "
+                "session's very first score pays for embedding every "
+                "chunk once, before any caching kicks in -- every score "
+                "after that only re-embeds the one chunk that changed."
             ),
             "deltas": (
                 "Every delta is computed on the raw fused score, not on the "

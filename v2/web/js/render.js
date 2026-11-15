@@ -8,12 +8,14 @@ import { $, html, raw } from './dom.js';
 import { state } from './store.js';
 import { simView } from './tabs/simulator.js';
 import { methodView } from './tabs/method.js';
+import { evidenceView } from './tabs/evidence.js';
 import { scorecard } from './components/scorecard.js';
 import { repaintAll } from './scoreclient.js';
 
 export const TABS = [
-  { id: 'sim',    label: 'Simulator',          view: simView,  needsDoc: true },
-  { id: 'method', label: 'How the score works', view: methodView, needsDoc: false },
+  { id: 'sim',      label: 'Simulator',          view: simView,      needsDoc: true },
+  { id: 'evidence', label: 'Evidence & call graph', view: evidenceView, needsDoc: true },
+  { id: 'method',   label: 'How the score works', view: methodView,  needsDoc: false },
 ];
 
 export function render() {

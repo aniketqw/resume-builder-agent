@@ -6,7 +6,7 @@ import { state, set } from './store.js';
 import { render, refreshPreview, refreshScore } from './render.js';
 import { toggleTheme } from './components/theme.js';
 import { toast } from './components/toast.js';
-import { loadDocument, refreshPaper, applyOps, setTarget, previewBody, runImport } from './actions.js';
+import { loadDocument, refreshPaper, applyOps, setTarget, previewBody, runImport, loadRepoGraph } from './actions.js';
 
 export function wireEvents() {
   document.addEventListener('click', onClick);
@@ -24,10 +24,16 @@ function onClick(event) {
   if (button.id === 'themeBtn') { toggleTheme(); return; }
   if (d.tab) {
     if (button.getAttribute('aria-disabled') === 'true') return;
-    set({ tab: d.tab }); render(); window.scrollTo(0, 0); return;
+    set({ tab: d.tab }); render(); window.scrollTo(0, 0);
+    if (d.tab === 'evidence') loadRepoGraph();
+    return;
   }
   if (d.view) { set({ view: d.view }); refreshPaper(); return; }
   if (d.role) { setTarget({ role_key: d.role }); return; }
+  if (d.evidenceRepo) {
+    set({ repoGraph: { ...state.repoGraph, selectedRepo: d.evidenceRepo } });
+    return;
+  }
 
   if (button.id === 'pickFile') { $('#fileInput')?.click(); return; }
   if (button.id === 'pasteGo') {

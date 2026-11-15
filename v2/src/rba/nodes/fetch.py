@@ -105,7 +105,14 @@ async def fetch_repo_facts(backend, repo: RepoRef, owner: str, config: Config,
 
         readme_path = (signals.readme_path if signals else "") or _find_readme(facts.tree)
         if readme_path:
-            text = await backend.get_file(repo.name, readme_path, ref)
+            # Its own try/except: a README fetch failing must not also lose
+            # the manifests and source files gathered below -- those are
+            # independent facts about the repo, not contingent on this one.
+            try:
+                text = await backend.get_file(repo.name, readme_path, ref)
+            except Exception as exc:
+                log.debug("readme fetch failed for %s: %s", repo.name, exc)
+                text = None
             if text:
                 facts.readme = text[:readme_max]
                 facts.readme_path = readme_path

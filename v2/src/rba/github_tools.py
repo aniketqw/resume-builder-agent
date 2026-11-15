@@ -172,7 +172,8 @@ class RestBackend:
         out = []
         for c in data[:limit]:
             out.append({
-                "sha": c.get("sha", "")[:10],
+                # Full SHA -- see the matching comment in McpBackend.list_commits.
+                "sha": c.get("sha", ""),
                 "message": ((c.get("commit") or {}).get("message") or "").split("\n")[0][:200],
                 "author": ((c.get("author") or {}) or {}).get("login", "")
                           or ((c.get("commit") or {}).get("author") or {}).get("name", ""),
@@ -219,6 +220,24 @@ def _is_session_error(exc: Exception | None) -> bool:
         return False
     text = str(exc).lower()
     return any(s in text for s in _SESSION_ERRORS)
+
+
+# The server resolved the request and told us, definitively, that the thing
+# asked for does not exist. Retrying cannot change that -- the ref, path or
+# resource will not exist on attempt 2 or 3 either -- so these fail fast
+# instead of paying the full retry/backoff budget for a guaranteed outcome.
+# Deliberately narrow: only patterns actually seen from GitHub's API/MCP
+# server. Session errors are checked first, so this never shadows a
+# transient failure that merely mentions "not found" in passing.
+_PERMANENT_ERRORS = ("could not resolve ref", "not found", "404",
+                     "no such file", "does not exist")
+
+
+def _is_permanent_error(exc: Exception | None) -> bool:
+    if exc is None:
+        return False
+    text = str(exc).lower()
+    return any(s in text for s in _PERMANENT_ERRORS)
 
 
 def _unwrap(result: Any) -> Any:
@@ -302,6 +321,19 @@ class McpBackend:
         self._adapter = MCPAdapter(self._target())
         await self._adapter.__aenter__()
         self._tools = {t.name: t for t in await self._adapter.list_tools()}
+        # `langchain.mcp` wires every tool with `handle_tool_error` set, so a
+        # server-reported failure (`isError=True` -- a bad ref, a missing
+        # file, a permission error) is silently converted into normal-looking
+        # text content instead of raising. Our code has no model in the loop
+        # to notice that the "content" is actually an error message -- it
+        # would just store it as if it were the file. Verified live: a bad
+        # commit ref returned `failed to resolve git reference: ...` as if it
+        # were `get_file`'s return value, which `prepare_evidence` then tried
+        # to parse as Python and reported a syntax error on every file.
+        # Disabling this restores the real exception, which `_call` below
+        # already retries and reports correctly.
+        for tool in self._tools.values():
+            tool.handle_tool_error = False
         writes = {"create_or_update_file", "delete_file", "push_files",
                   "create_repository", "delete_repository", "fork_repository",
                   "merge_pull_request", "create_branch"} & set(self._tools)
@@ -339,14 +371,24 @@ class McpBackend:
             raise RuntimeError(f"MCP server does not expose {name!r}; "
                                f"available: {sorted(self._tools)}")
         last: Exception | None = None
+        made = 0
         for attempt in range(attempts):
             async with self._sem:
                 self.calls += 1
+                made += 1
                 try:
                     return _unwrap(await tool.ainvoke(kwargs))
                 except Exception as exc:
                     last = exc
                     self.retries += 1
+            # The server definitively resolved the request and reported that
+            # what was asked for does not exist -- retrying cannot change
+            # that outcome, so stop here rather than spending the full
+            # backoff budget (up to ~3.5s across 3 attempts) on a guaranteed
+            # repeat failure. A sweep over a dozen source files per repo
+            # makes this the difference between a fast import and a slow one.
+            if _is_permanent_error(last):
+                break
             # A long sweep outlives the server's session: once it dies, every
             # later call fails with the same error until the client reconnects.
             # Treat a failure as a possibly-dead session and rebuild it.
@@ -354,7 +396,7 @@ class McpBackend:
                 await self._reconnect()
                 tool = self._tools.get(name, tool)
             await asyncio.sleep(0.5 * (2 ** attempt))
-        raise RuntimeError(f"MCP {name} failed after {attempts} attempts: {last}")
+        raise RuntimeError(f"MCP {name} failed after {made} attempt(s): {last}")
 
     async def _reconnect(self) -> None:
         async with self._lock:
@@ -509,7 +551,14 @@ class McpBackend:
         for c in items[:limit]:
             commit = c.get("commit") or {}
             out.append({
-                "sha": (c.get("sha") or "")[:10],
+                # Full SHA, not truncated: this becomes `facts.head_sha`, which
+                # is passed straight back to `get_file(..., ref=...)` to pin
+                # every fetch to this exact commit. The hosted GitHub MCP
+                # server's `get_file_contents` cannot resolve an abbreviated
+                # SHA as a ref -- verified live: a 10-char sha failed with
+                # "could not resolve ref ... as a branch or a tag", the full
+                # 40-char sha for the same commit succeeded immediately.
+                "sha": c.get("sha") or "",
                 "message": (commit.get("message") or "").split("\n")[0][:200],
                 "author": (c.get("author") or {}).get("login", "")
                           or (commit.get("author") or {}).get("name", ""),

@@ -123,6 +123,7 @@ async def _run_import(app_state, session, body: ImportRequest, job) -> dict:
         session.excluded = result.excluded
         session.stats = result.stats
         session.claims = result.claims
+        session.repo_graph = result.repo_graph
 
     failure = diagnose_failures(result.stats)
     return {
@@ -195,3 +196,42 @@ async def job_events(request: Request, job_id: str) -> StreamingResponse:
     return StreamingResponse(frames(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache",
                                       "X-Accel-Buffering": "no"})
+
+
+@router.get("/session/{session_id}/repo-graph")
+async def repo_graph(request: Request, session_id: str) -> dict:
+    """Everything the Evidence & Call-Graph tab needs, per imported repo.
+
+    Every claim is reported here, not just the ones that made it onto the
+    resume -- a `needs_measure` or `rejected` claim is exactly what the tab
+    exists to make legible: *why* a line did or didn't survive verification,
+    not only the ones that did.
+    """
+    session = _session(request, session_id)
+    by_repo: dict[str, list] = {}
+    for claim in session.claims:
+        by_repo.setdefault(claim.repo, []).append({
+            "text": claim.text,
+            "status": claim.status.value,
+            "reason": claim.reason,
+            "measure_hint": claim.measure_hint,
+            "evidence": [{"path": e.path, "quote": e.quote, "repo": e.repo,
+                         "sha": e.sha, "line_start": e.line_start,
+                         "line_end": e.line_end, "permalink": e.permalink}
+                        for e in claim.evidence],
+        })
+
+    # Union, not just `repo_graph`'s keys: a repo can have claims without a
+    # code index (non-Python, or indexing failed) -- dropping it here would
+    # silently hide claims the resume actually shows.
+    all_repos = set(session.repo_graph) | set(by_repo)
+    return {
+        "repos": {
+            repo: {
+                "claims": by_repo.get(repo, []),
+                "graph": (session.repo_graph[repo].to_dict()
+                         if repo in session.repo_graph else None),
+            }
+            for repo in sorted(all_repos)
+        },
+    }

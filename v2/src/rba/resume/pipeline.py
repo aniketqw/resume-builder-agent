@@ -50,6 +50,7 @@ class ImportResult:
     repos: list = field(default_factory=list)
     selected: list = field(default_factory=list)
     excluded: list = field(default_factory=list)
+    repo_graph: dict = field(default_factory=dict)
 
     def __iter__(self):
         return iter((self.doc, self.stats))
@@ -164,6 +165,7 @@ async def build_from_github(username: str, *, github_token: str = "",
         selected=list(chosen),
         excluded=[r for r in public
                   if r.name not in {c.name for c in chosen}],
+        repo_graph=dict(final.get("repo_graph") or {}),
     )
 
 

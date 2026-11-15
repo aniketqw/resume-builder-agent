@@ -218,11 +218,77 @@ go-ahead first, since it spends real API quota and posts to a real LangSmith pro
 
 ---
 
+## Iteration 13 — chunked dense scoring (fixes the 512-token truncation), with a determinism fix
+
+The dense ATS channel embeds with `bge-small-en-v1.5`, a 512-token-ceiling
+model. `aniket_bits.txt` runs ~1,150 tokens as plain text — roughly 56% of
+every resume was silently invisible to the dense channel, truncated before
+embedding. Fix: chunk the document along section/bullet boundaries, embed
+each chunk, and mean-pool (length-weighted, re-normalized to unit length)
+into one vector — established practice for long-document sentence-embedding
+matching (sentence-BERT chunk-averaging). The alternative, Jina AI's "late
+chunking" (2024), needs a long-context encoder to embed the whole document
+*before* splitting, which `bge-small` cannot do without reopening the
+memory-footprint tradeoff already settled in `docs/literature-survey.md`.
+Full citation-grade literature grounding for both is deferred to
+`docs/literature.tex` (Part D) — this entry states the practice plainly, not
+as a fully-cited trail yet.
+
+| # | Finding / change | File | Why | What it improves |
+|---|---|---|---|---|
+| 1 | New `document_chunks(doc)`: splits a resume into section/bullet-bounded chunks with content-derived, toggle-stable chunk IDs | `resume/chunking.py` | Chunk boundaries must track resume structure (sections/bullets), not an arbitrary token window, or a chunk can split a bullet mid-sentence | Every chunk is a coherent unit; IDs stay stable when an unrelated bullet is toggled, so the cache keeps working |
+| 2 | **Determinism bug found and fixed**: the same chunk embedded in one batch call alongside *different* batch-mates produced a reproducible ~4.3e-08 vector-level difference (not randomness — identical across 10 trials; a floating-point batch-padding artifact of `encode_batch`'s dynamic padding-to-longest-in-batch). This broke exact (`==`) equality between a document scored alone (`rescore()`) and the same document scored as the base of a leave-one-out sweep (`attribute()`) | `ats/batch.py` (`_dense_values`) | The UI's whole premise is that "the document's current score" is one reproducible number no matter how many variants are swept alongside it in a batch request — floating-point batch noise would make that false | `_dense_values`'s chunked branch now embeds the **first** chunked candidate (always "the document as it stands") via its own dedicated `_ensure_chunks_embedded` call, then embeds the rest together in a second call, merging vector maps before pooling. The base candidate is now bit-exact-reproducible regardless of batch composition |
+| 3 | Rejected alternative fix: fixed-length padding instead of dynamic batch padding, to eliminate the ~4.3e-08 diff at the source | (design only, not shipped) | Measured directly: 76.9x slower (9ms → 701ms for two short chunks) | Confirms the isolated-first-call fix (row 2) is the right tradeoff — not a shortcut |
+| 4 | Regression test proving row 2's fix, verified by *temporarily reverting it*: confirmed the test fails with the exact predicted ~4e-8 diff, then restored the fix and confirmed it passes | `tests/test_chunking.py::test_base_candidate_is_bit_exact_regardless_of_batch_mates` | A fix that merely "looks right" isn't enough — proving the test actually catches the bug it claims to catch is the project's stated verification discipline | This regression cannot silently come back |
+| 5 | `chunks=` wired into every "current document" candidate: `rescore()`/`attribute()`'s full-document and leave-one-out candidates, and `/api/score`'s and `/api/score/batch`'s base + variant candidates | `resume/attribution.py`, `rba_api/routes/score.py` | Chunking only fixes truncation where it's actually used — every scoring path had to opt in, not just the engine-level API | All four scoring entry points use the same chunked-and-pooled vectors; no path still single-embeds a truncated blob |
+| 6 | Two more cross-path tests broke from row 5's wiring and were fixed by aligning both sides to use chunking consistently, loosening `==` to `pytest.approx(..., abs=1e-6)` with the row-2 floor as the documented reason: `test_batch.py::test_dedup_matches_the_naive_path_with_dense_on` (was comparing un-chunked candidates against now-always-chunked `rescore()` — apples to oranges) and `test_api.py::test_attribution_matches_the_engine` (warm session cache vs a fresh no-cache direct call) | `tests/test_batch.py`, `tests/test_api.py` | Both comparisons are fundamentally cross-request / cache-state-dependent, which A1's fix (row 2) does not and architecturally cannot make bit-exact without the row-3 cost | `test_score_equals_rescore_exactly` and `test_base_candidate_is_bit_exact_regardless_of_batch_mates` were explicitly left untouched at `==` — they test the property that genuinely holds exactly |
+| 7 | `tests/test_live.py::test_one_toggle_stays_inside_the_interaction_budget` failed at 818ms (budget 450ms) — root cause: the test never passed a `cache=`, so chunking's caching benefit (now load-bearing for speed) went unused | `tests/test_live.py` | Chunking trades a slower cold start for the ability to see the whole document; without a warm cache every re-score re-embeds every chunk from scratch | Fixed by sharing one `DenseCache()` across warm-up and measured calls, matching how `rba_api/sessions.py::Session.dense_cache` actually works in production |
+| 8 | New, separate, honestly-labelled test for the real cold-start cost rather than hiding it: `test_the_first_ever_score_in_a_session_is_not_held_to_the_warm_budget` — measured ~753ms for a brand-new session's first-ever score, asserted only against a loose 3000ms sanity ceiling | `tests/test_live.py` | A session's first score genuinely is slower now (chunking's accepted cost); hiding that inside a passing 450ms test would be dishonest, not a fix | A real regression here stays visible (printed), not silently masked |
+| 9 | Live HTTP-layer verification against the actual running dev server (not the unit-test micro-benchmark): uploaded `fixtures/aniket_bits.txt`, set a real JD, one warm-up `POST /api/score`, then measured `POST /api/score` (raw `0.6624445573832407`, **2.2ms**) and `POST /api/score/batch` with 5 variants (base raw `0.6624445573832407`, **2.7ms**) | (live run via `httpx`) | Confirms the fix and the caching story hold through the real HTTP layer, not just inside pytest | Flicker check: the two base/headline raw floats are bit-identical through the live API — both numbers sit far under the 450ms unit-test budget |
+
+**Test delta:** full suite **518 passed, 0 failed** (was 502 at the end of Iteration 12; net +16 across `test_chunking.py` (new file) and the fixes above). `ruff check src tests`: all checks passed.
+
+---
+
+## Iteration 14 — Evidence & Call-Graph tab
+
+A new tab makes the claim→evidence chain and the per-repo code structure
+directly inspectable, instead of only showing up as the finished resume
+lines. The data already existed in graph state (`prepare_evidence.py`
+produces a `RepoBrain` per repo) — it was being computed and then dropped on
+the floor before this iteration, same shape of bug as Iteration 8's
+`facts`/`summaries`/`claims` fix.
+
+| # | Finding / change | File | Why | What it improves |
+|---|---|---|---|---|
+| 1 | `ImportResult` gained `repo_graph: dict`; `build_from_github` now captures `final.get("repo_graph")` instead of dropping it | `resume/pipeline.py` | The graph state already had it (`prepare_evidence` node); nothing downstream could reach it | Code-structure data survives past the graph run |
+| 2 | `to_dict()` added to every `repobrain.py` dataclass (`Symbol`, `CallEdge`, `RouteBinding`, `FileIndex`, `RepoBrain`), explicit dict literals matching `document.py`'s convention | `repobrain.py` | An API response needs plain JSON, and `dataclasses.asdict()` is not this project's convention | `RepoBrain.to_dict()` is the entire payload for the call-graph panel |
+| 3 | `Session.repo_graph` added; `routes/github.py` stores it alongside `session.claims` on import completion; new `GET /api/session/{id}/repo-graph` returns, per repo, **every** claim (verified/needs_measure/rejected — not only the ones that reached the resume) with full evidence, plus the repo's `RepoBrain.to_dict()` | `rba_api/sessions.py`, `rba_api/routes/github.py` | The whole point of this tab is explaining *why* a claim did or didn't survive verification — hiding the rejected/needs_measure ones would defeat it | A `needs_measure` claim now shows its `measure_hint`; a `rejected` one shows its `reason`; nothing is silently hidden |
+| 4 | Response keys are the union of `repo_graph`'s repos and claims' repos, not just `repo_graph`'s | `routes/github.py` | A repo can have claims without a successful code index (non-Python source, or an `ast` parse failure) — keying off `repo_graph` alone would silently drop its claims from the response | Every claim is reachable from this endpoint, with `"graph": null` honestly marking the repos that have no index |
+| 5 | New `web/js/tabs/evidence.js`: repo picker, a claim→evidence chain list (status chip, quote, clickable GitHub permalink or — for an unverified claim — its `measure_hint`/`reason` instead of a link), and a call-graph panel (`<details>` per file, symbols with line ranges and their unique callees, plus a `partial_source` gaps list) | `web/js/tabs/evidence.js`, `render.js`, `store.js`, `api.js`, `actions.js`, `events.js`, `css/panels.css` | Deliberately a plain list, not a force-directed graph diagram — `repobrain.py`'s own scope is bare-name call resolution, Python-only, with no import resolution (see its module docstring); a graph layout would visually overclaim precision this data doesn't have | A GitHub import's evidence and code structure become directly clickable, reusing the existing `--good`/`--warn`/`--bad` CSS tokens for status colour so it doesn't invent a new visual language |
+| 6 | Three new tests: `test_to_dict_is_json_serialisable_and_carries_the_real_structure` (`test_repobrain.py`); `test_repo_graph_reports_every_claim_status_and_the_code_index`, `test_repo_graph_is_empty_for_a_session_that_never_imported`, `test_repo_graph_on_an_unknown_session_is_404` (`test_github_import.py`) | `tests/test_repobrain.py`, `tests/test_github_import.py` | Proves the endpoint's shape, the all-statuses guarantee, and the 404/empty edge cases, not just that it returns *something* | `test_github_import.py` now 20/20, `test_repobrain.py` now 9/9 |
+| 7 | Live-server verification: `node --check` on every touched JS file; live `GET /js/tabs/evidence.js`, `/css/panels.css`, `/js/render.js` all 200; live `GET /api/session/{id}/repo-graph` against a fresh session returns `{"repos": {}}` (200), against an unknown session returns 404 | (live run) | No bundler in this project, so a JS syntax error would otherwise only surface in a browser console | Confirms the new code is reachable and syntactically valid through the real HTTP layer, not just inside pytest |
+
+**Not done, honestly recorded:** clicking through the tab against a *real*
+GitHub import in an actual browser. That spends real Groq/GitHub API quota
+and needs the user's explicit go-ahead (as the live import in Iteration 12
+did); this session had no browser-automation tool to drive it headlessly
+either way. The fake-pipeline tests in `test_github_import.py` exercise the
+identical endpoint shape a real import produces, so the endpoint and UI
+logic are proven; only the "a human watched the permalinks resolve in a
+browser" step is outstanding.
+
+**Test delta:** full suite **522 passed, 0 failed** (was 518 at the end of
+Iteration 13; +4 from this iteration). `ruff check src tests`: all checks
+passed.
+
+---
+
 ## Summary
 
 | Gate | Status |
 |---|---|
-| Tests | **502 passed, 0 failed, 0 skipped** (baseline was 540; net change accounts for −71 deleted orphan tests, +33 new tests across the work) |
+| Tests | **522 passed, 0 failed, 0 skipped** (baseline was 540 before the revamp started; net change accounts for −71 deleted orphan tests, +53 new tests across all iterations including chunking and the Evidence tab) |
 | Lint | `ruff check src tests`: all checks passed, throughout every iteration |
 | One graph, two entry points | Verified: `grep -n build_graph src/rba/cli.py src/rba/resume/pipeline.py` hits both; `test_browser_import_stops_at_the_document` proves it |
 | Demo path (resume+JD, resume+role) stays Groq-free | Verified functionally with a guarded `GroqClient.__init__` monkeypatch: zero construction attempts across both paths |

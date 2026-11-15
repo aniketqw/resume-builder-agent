@@ -33,6 +33,11 @@ export const state = {
   // and are deliberately never persisted.
   github: { username: '', maxRepos: 6, result: null },
   importJob: null,          // { running, message, fraction, jobId }
+
+  // The Evidence & Call-Graph tab. `sessionId` here is the session this was
+  // last fetched for -- a stale fetch from a previous session must not be
+  // shown as if it described the current one.
+  repoGraph: { sessionId: null, loading: false, repos: {}, selectedRepo: '' },
 };
 
 const listeners = new Set();

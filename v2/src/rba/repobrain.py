@@ -39,6 +39,11 @@ class Symbol:
     line_end: int
     qualname: str = ""  # "<path>::<name>", unique within the indexed set
 
+    def to_dict(self) -> dict:
+        return {"name": self.name, "kind": self.kind, "path": self.path,
+                "line_start": self.line_start, "line_end": self.line_end,
+                "qualname": self.qualname}
+
 
 @dataclass
 class CallEdge:
@@ -53,6 +58,10 @@ class CallEdge:
     path: str
     line: int
 
+    def to_dict(self) -> dict:
+        return {"caller": self.caller, "callee": self.callee,
+                "path": self.path, "line": self.line}
+
 
 @dataclass
 class RouteBinding:
@@ -61,6 +70,10 @@ class RouteBinding:
     handler: str        # qualname of the decorated function
     path: str
     line: int
+
+    def to_dict(self) -> dict:
+        return {"method": self.method, "pattern": self.pattern,
+                "handler": self.handler, "path": self.path, "line": self.line}
 
 
 @dataclass
@@ -71,6 +84,13 @@ class FileIndex:
     routes: list[RouteBinding] = field(default_factory=list)
     parse_error: str = ""
 
+    def to_dict(self) -> dict:
+        return {"path": self.path,
+                "symbols": [s.to_dict() for s in self.symbols],
+                "calls": [c.to_dict() for c in self.calls],
+                "routes": [r.to_dict() for r in self.routes],
+                "parse_error": self.parse_error}
+
 
 @dataclass
 class RepoBrain:
@@ -80,6 +100,10 @@ class RepoBrain:
     #: Never silent -- a gap here is a fact, reported upstream as a
     #: needs-review item, not swallowed.
     partial_source: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return {"files": {path: idx.to_dict() for path, idx in self.files.items()},
+                "partial_source": list(self.partial_source)}
 
     def all_symbols(self) -> list[Symbol]:
         return [s for idx in self.files.values() for s in idx.symbols]
