@@ -6,7 +6,10 @@ evidence-linked resume content.
 
 For the full architecture — the LangGraph pipeline, the scoring math with its
 citations, the claim-verification mechanism, and a file-by-file reference —
-see **[`ANALYSIS.md`](ANALYSIS.md)**. An earlier Streamlit prototype is kept
+see **[`ANALYSIS.md`](ANALYSIS.md)**. For a real run walked through node by
+node — actual LangSmith trace data and timing next to the exact code that
+produced it, with GitHub permalinks — see
+**[`TRACE_WALKTHROUGH.md`](TRACE_WALKTHROUGH.md)**. An earlier Streamlit prototype is kept
 in [`v1/`](../v1) for history.
 
 ---
