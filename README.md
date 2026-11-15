@@ -117,6 +117,15 @@ something that gets printed and emailed.
 Imported lines arrive **switched off**, each showing the measured gain if you
 accept it. Your resume is the baseline and is never rewritten.
 
+### The GitHub-import pipeline
+
+![The compiled LangGraph pipeline: 12 nodes, one conditional branch at
+build_document](docs/v2-graph.png)
+
+Exported directly from the real compiled graph (`scripts/export_graph.py`),
+not hand-drawn — see [`v2/ANALYSIS.md`](v2/ANALYSIS.md) for what each node
+does and why the graph branches where it does.
+
 ## Tests
 
 ```bash

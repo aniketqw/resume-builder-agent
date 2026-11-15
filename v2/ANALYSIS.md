@@ -77,6 +77,13 @@ with `graph.py`. The dotted edges are the one conditional branch
 straight to `__end__`; only a CLI run (`full_run=True`) continues into
 `build_resumes`.
 
+![The compiled LangGraph pipeline: 12 nodes, one conditional branch at
+build_document](../docs/v2-graph.png)
+
+<details>
+<summary>Mermaid source (renders natively if GitHub's image cache is
+unavailable, or if you want to edit/regenerate it)</summary>
+
 ```mermaid
 graph TD;
 	__start__([<p>__start__</p>]):::first
@@ -114,11 +121,11 @@ graph TD;
 	classDef last fill:#bfb6fc
 ```
 
-*Regenerate with `.venv/bin/python scripts/export_graph.py` after any change
-to `graph.py` — it writes `docs/v2-graph.mmd` (the source above) and tries
-`docs/v2-graph.png` via LangGraph's `draw_mermaid_png()` (calls out to
-mermaid.ink; skipped gracefully if that's unreachable, since the Mermaid
-source alone already renders natively in a GitHub-viewed markdown file).*
+</details>
+
+*Regenerate both with `.venv/bin/python scripts/export_graph.py` after any
+change to `graph.py` — it writes `docs/v2-graph.mmd` and
+`docs/v2-graph.png` via LangGraph's own `draw_mermaid`/`draw_mermaid_png`.*
 
 **Why this node ordering specifically:** Groq cannot combine tool use with
 structured JSON output in one request. So every node that touches GitHub's
