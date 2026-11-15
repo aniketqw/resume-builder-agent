@@ -105,6 +105,37 @@ class FakeGroq:
         return httpx.MockTransport(handler)
 
 
+def ollama_chat_response(content: str, *, model: str = "qwen2.5:14b-instruct",
+                         prompt_eval_count: int = 50, eval_count: int = 130
+                         ) -> dict[str, Any]:
+    """Shaped like a real `/api/chat` response -- confirmed live against
+    Ollama 0.20.2 with `format` set to a full JSON Schema."""
+    return {
+        "model": model,
+        "message": {"role": "assistant", "content": content},
+        "done": True,
+        "prompt_eval_count": prompt_eval_count,
+        "eval_count": eval_count,
+    }
+
+
+class FakeOllama:
+    """Scripted Ollama transport. Records every request body it sees."""
+
+    def __init__(self, responses: list[dict[str, Any] | tuple[int, dict[str, Any]]]):
+        self._responses = list(responses)
+        self.requests: list[dict[str, Any]] = []
+
+    def transport(self) -> httpx.MockTransport:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.requests.append(json.loads(request.content))
+            item = self._responses.pop(0) if self._responses else ollama_chat_response("{}")
+            status, payload = item if isinstance(item, tuple) else (200, item)
+            return httpx.Response(status, json=payload)
+
+        return httpx.MockTransport(handler)
+
+
 class FakeJev:
     def __init__(self, answers: dict[str, Any] | Callable[[dict], dict],
                  status: int = 200, input_tokens: int = 465):

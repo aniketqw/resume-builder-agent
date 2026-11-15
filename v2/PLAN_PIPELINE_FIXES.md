@@ -581,19 +581,52 @@ real upload, not just the synthetic fpdf2 fixtures in
 
 ## New work items from this session, in the order the user wants them (fixes first, these after)
 
-1. **Finish diagnosing Fix 3's real-world miss** (above) before anything
-   else -- the frontend fix (item 4) depends on this being right first.
-2. **Ollama as a configurable alternative to Groq** (IN PROGRESS -- model
-   chosen and reachable; client code not yet written). Full detail in its
-   own section below ("Ollama: current state"). Short version: endpoint
-   `http://172.24.16.155:11434`, a server-side permissions bug on
-   `/home/admin/ollama-models` was found and fixed directly (`chmod 777`),
-   model `qwen2.5:14b-instruct` (Q4_K_M, 8.99 GB) is pulled and already
-   smoke-tested for structured JSON output -- clean, schema-matching JSON
-   on the first try, no corrective retry needed (contrast with
-   `openai/gpt-oss-20b` via Groq, which needed Fix 1's retry path and still
-   failed outright for 2/N repos in the live import). Next actual step:
-   write the client code (see that section for the exact design).
+1. **Finish diagnosing Fix 3's real-world miss** -- DONE. Fixed and
+   verified directly against the user's real PDF (`H20250169_ Sarvam
+   AI.pdf`): pdfplumber merges a section's heading line into the same
+   detected table as its header row; `_pick_table` now searches the first
+   3 rows of a grid instead of assuming row 0. Committed as `3ea32c9`
+   (pushed to `v2-revamp`). Full detail in Fix 3's own STATUS entry above.
+2. **Ollama as a configurable alternative to Groq** -- DONE, verified live
+   against the real remote host (not just a fake transport). New
+   `src/rba/ollama_client.py`: `OllamaClient.structured()` matches
+   `GroqClient.structured()`'s exact shape (`(messages, schema, *, node,
+   tier, model, cache_key, **overrides) -> (T, Usage)`), POSTs to
+   `/api/chat` with `format` set to the schema's real JSON Schema (not
+   `"json"` mode), retries once on a schema violation with the same
+   corrective-message repair `GroqClient` uses, fills `Usage` from
+   Ollama's real `prompt_eval_count`/`eval_count` fields, and supports the
+   same `Cache` class Groq uses (so a repeat prompt costs zero tokens
+   either way). No rate limiter -- that is the entire point.
+   `graph.py`'s `Runner.connect()` now branches on `LLM_PROVIDER` (env var,
+   default `groq`); nothing in `nodes/summarize.py`/`build.py`/`plan.py`
+   needed to change, confirmed by grepping for every `client.structured()`
+   call site before writing this. `config.yaml` gained an `ollama:`
+   section (`base_url`/`model` defaults, overridable per-environment via
+   `OLLAMA_BASE_URL`/`OLLAMA_MODEL`); `.env`/`.env.sample` gained
+   `LLM_PROVIDER`/`OLLAMA_BASE_URL`/`OLLAMA_MODEL`. Six new tests in
+   `tests/test_ollama_client.py` (fake-transport pattern matching
+   `test_groq_client.py`: schema shape, retry-on-violation, give-up-after-
+   retry, 4xx not retried, cache hit costs zero tokens, usage grouped by
+   node) -- all pass. **Also verified with a real, non-fake call** against
+   `http://172.24.16.155:11434` directly (not through the test suite):
+   summarized a one-line repo description into 3 correctly-shaped claims
+   on the first attempt, `Usage(prompt_tokens=53, completion_tokens=139,
+   total_tokens=192)`. Full suite after this change: 538 passed, 0 failed,
+   lint clean.
+   - **Known gap, not yet addressed**: `OllamaClient` does not yet feed
+     LangSmith tracing the way `GroqClient._trace()` does (child runs
+     nested under the active graph-node run). Usage accounting
+     (`usage_report()`/`usage_total()`) works identically to `GroqClient`,
+     so cost/token reporting in the CLI/API is unaffected -- only the
+     LangSmith trace tree would be missing the per-call child spans for an
+     Ollama-backed run. Address this if/when Ollama becomes the default
+     rather than an opt-in, not before.
+   - **Not yet done**: an actual end-to-end GitHub import run with
+     `LLM_PROVIDER=ollama` set, to compare real schema-failure rate and
+     claim quality against today's Groq run -- the direct `structured()`
+     call above proves the client works, not that a full import's claims
+     come out good.
 3. **Refactor** -- user's own words: "it is a little bit too bulky." Scope
    not yet defined; likely candidates after today's additions are
    `groq_client.py` (now carries two schema-failure paths) and
