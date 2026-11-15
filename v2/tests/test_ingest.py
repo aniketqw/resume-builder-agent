@@ -386,6 +386,55 @@ def test_pdfplumber_recovers_the_table_when_a_heading_is_merged_into_it():
     assert body.rows == [["UG", "AI/ML", "VIT Amravati", "VIT", "8.71 CGPA", "2025"]]
 
 
+_SPLIT_DATE_INTERNSHIP = """SUMMARY
+Builds things.
+ACADEMIC DETAILS
+COURSE SPECIALIZATION INSTITUTE/COLLEGE BOARD/UNIVERSITY SCORE YEAR
+UG CSE VIT VIT 8.71 CGPA 2025
+INTERNSHIPS
+ Software Firmware Engineer, Marvell Semiconductors
+ May 2026 - Jul 2026
+\x7f Built a live runtime digital twin of an SDN data-center fabric sourced from real controller state, enabling production-safe pre-deployment validation and
+failure prediction
+\x7f Developed a telemetry-driven fault intelligence system mapping hardware health signals to automated multi-tier corrective actions
+\x7f Designed behavioral workload identification from traffic patterns, distinguishing AI training from conventional workloads without relying on self-reported
+identity
+"""
+
+
+def test_a_title_and_date_on_separate_lines_still_make_one_entry():
+    """Reproduces a real live-upload failure: this PDF's extraction put an
+    entry's title and its date range on two separate lines (confirmed
+    directly against the user's actual resume, not guessed) -- the old
+    code required both on one line, silently dropped the title-only line
+    as "stray text before the first entry", and gave the entry an empty
+    title (the date-only line, with nothing before the date to call a
+    title)."""
+    doc = parse_bits(_SPLIT_DATE_INTERNSHIP)
+    entries = section(doc, "INTERNSHIPS").entries
+    assert len(entries) == 1
+    assert entries[0].title == "Software Firmware Engineer, Marvell Semiconductors"
+    assert entries[0].dates == "May 2026 - Jul 2026"
+
+
+def test_bullets_with_a_glyph_marker_and_no_terminal_period_stay_separate():
+    """Same real file, a second bug: these bullets use a `\\x7f` marker
+    glyph instead of ending in a period, so the old "ends in a full stop"
+    continuation rule merged all three into one giant bullet. A leading
+    bullet marker is now an equally hard "new bullet" signal."""
+    doc = parse_bits(_SPLIT_DATE_INTERNSHIP)
+    bullets = section(doc, "INTERNSHIPS").entries[0].bullets
+    assert len(bullets) == 3
+    assert bullets[0].text.startswith("Built a live runtime digital twin")
+    assert bullets[0].text.endswith("failure prediction")
+    assert bullets[1].text == (
+        "Developed a telemetry-driven fault intelligence system mapping "
+        "hardware health signals to automated multi-tier corrective actions")
+    assert bullets[2].text.endswith("identity")
+    # No stray marker character leaking into the stored text.
+    assert all("\x7f" not in b.text for b in bullets)
+
+
 def test_pick_table_will_not_steal_an_unrelated_grid():
     """A detected grid that doesn't look like an academic-details header
     row must not be forced onto this section -- that would silently invent

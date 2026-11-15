@@ -315,6 +315,21 @@ the `dev` optional-dependency group, not the main dependency set.
 
 ---
 
+## Iteration 16 — Ollama as a configurable Groq alternative, and two more real parsing bugs
+
+| # | Change | File | Why | What it improves |
+|---|---|---|---|---|
+| 1 | New `OllamaClient` matching `GroqClient.structured()`'s exact shape (`(messages, schema, ...) -> (T, Usage)`); `graph.py`'s `Runner.connect()` branches on `LLM_PROVIDER` (env var) to pick which client to build | `ollama_client.py`, `graph.py` | Removes Groq's 8,000 TPM free-tier rate limit as a factor entirely for anyone who opts in -- no changes needed in `nodes/summarize.py`/`build.py`/`plan.py`, confirmed by grepping every `client.structured()` call site first | Verified both with a 6-test fake-transport suite and a real call against a live remote Ollama host -- clean, correctly-shaped JSON on the first attempt |
+| 2 | Found and fixed live: `_pick_table` only checked a detected grid's row 0, but pdfplumber merges a section's heading line into the same table as its header row when nothing visually separates them -- the first version of Fix 3 (Iteration 15) worked on every synthetic test and failed on the one real file tested | `resume/ingest.py` | Confirmed against the user's actual uploaded PDF, not synthetic fixtures | `_pick_table` searches a grid's first 3 rows; verified the regression test fails without this depth search |
+| 3 | Found and fixed live, re-checking the *whole* real document's render (not just the table that was already known to be broken): an entry's title and date range landed on two separate lines in this PDF's extraction, which `_parse_entries` had never seen before -- it silently dropped the title line and produced an entry with an **empty title** | `resume/ingest.py` | Affected every entry in the real resume (Internships, Projects, Position of Responsibility), not an isolated case | New `_merge_split_dates()` rejoins them before entry-splitting; verified by reverting and confirming the predicted empty-title failure |
+| 4 | Found and fixed in the same pass: this PDF's bullet glyph extracted as `\x7f` with no terminal period on any bullet, so the "ends in a full stop" continuation rule merged three separate bullets into one | `resume/ingest.py` | A leading bullet marker is as hard a "new bullet" signal as a trailing period | `_BULLET_MARKERS` added to `_join_wrapped`'s `starts_new` check, marker stripped from stored text; verified by reverting |
+
+**Test delta:** full suite **540 passed, 0 failed** (was 532 at the end of
+Iteration 15; +8 across the new Ollama tests and the two new parsing
+regressions). `ruff check src tests`: all checks passed.
+
+---
+
 ## Summary
 
 | Gate | Status |

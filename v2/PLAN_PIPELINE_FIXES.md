@@ -634,14 +634,47 @@ real upload, not just the synthetic fpdf2 fixtures in
    after Ollama is in, not before -- adding a second LLM backend will
    reshape `groq_client.py`'s boundaries anyway, so refactoring it twice
    would be wasted motion.
-4. **Frontend rendering** -- user's explicit final priority ("the most
-   important thing is like you have to fix the front end part"). Likely
-   mostly resolved once Fix 3's real-world miss (item 1) is actually
-   fixed, since `html.py`/`latex.py` were already confirmed to render
-   whatever `Table` object they're given correctly -- the defect has
-   consistently traced back to parsing, not rendering, every time it's
-   been checked. Re-confirm against a real corrected render before
-   assuming this is only a parsing problem.
+4. **Frontend rendering** -- DONE, verified live through `/api/render/html`
+   against the user's real PDF end to end. Confirmed, again, that the
+   defect was never in `html.py`/`latex.py`: both already rendered
+   whatever document structure they were given correctly. Re-checking the
+   *whole* real document's render (not just the one table) surfaced two
+   more, entirely new, real parsing bugs in `resume/ingest.py` -- neither
+   related to tables:
+   - **Title and date on separate lines**: this PDF's extraction put an
+     entry's heading ("Software Firmware Engineer, Marvell
+     Semiconductors") and its date range ("May 2026 - Jul 2026") on two
+     separate lines, not one. `_parse_entries` only recognised a heading
+     when both were on the same line -- the title-only line was silently
+     dropped as "stray text before the first entry," and the date-only
+     line became an entry with an **empty title**. New `_merge_split_dates()`
+     rejoins a heading-shaped, date-less line with an immediately
+     following pure-date line before `_parse_entries` ever sees them.
+     Affected every single entry in this real resume (Internships,
+     Projects, Position of Responsibility), not an isolated case.
+   - **Bullets with no terminal punctuation**: this PDF's bullet glyph
+     extracted as `\x7f` (a private-use-area character some PDF producers
+     emit for a bullet dingbat), and none of its bullets ended in a
+     period. `_join_wrapped`'s only "new bullet" signal was a trailing
+     full stop, so all three bullets under "Internships" merged into one.
+     A leading bullet marker (`_BULLET_MARKERS = "-*•·—\x7f"`, sharing its
+     character set with `pipeline.py`'s flat-text parser) is now an
+     equally hard signal, and the marker itself is stripped from the
+     stored text.
+   - Two new regression tests in `tests/test_ingest.py`
+     (`test_a_title_and_date_on_separate_lines_still_make_one_entry`,
+     `test_bullets_with_a_glyph_marker_and_no_terminal_period_stay_separate`)
+     reproduce both exactly, built from the real extracted lines (not
+     guessed). **Verified both catch the bug**: temporarily reverted both
+     changes, confirmed both tests fail with the predicted wrong output
+     (empty title; one 3x-length merged bullet), restored the fixes,
+     confirmed both pass.
+   - Re-verified the entire real document end to end, live, through
+     `POST /api/render/html`: every entry across Internships, Projects,
+     and Position of Responsibility now has the correct title, subtitle,
+     dates, and individually-separated bullets.
+   - Full suite after this: **540 passed, 0 failed.** `ruff check src
+     tests`: all checks passed.
 
 ---
 
