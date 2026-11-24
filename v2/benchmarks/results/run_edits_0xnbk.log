@@ -1,0 +1,36 @@
+[     5s] 0xnbk: 6374 pairs; eligible No-Fit 100, Potential 100
+[    78s]   E1 20/100 (eligible 20)
+[   158s]   E1 40/100 (eligible 40)
+[   229s]   E1 60/100 (eligible 60)
+[   311s]   E1 80/100 (eligible 80)
+[   382s]   E1 100/100 (eligible 100)
+[   453s]   E1 20/100 (eligible 20)
+[   526s]   E1 40/100 (eligible 40)
+[   600s]   E1 60/100 (eligible 60)
+[   671s]   E1 80/100 (eligible 80)
+[   745s]   E1 100/100 (eligible 100)
+[   840s]   E2 eligible 99, gap>1pt 40
+[   916s]   E3 10/100 (usable 10)
+[  1006s]   E3 20/100 (usable 20)
+[  1074s]   E3 30/100 (usable 28)
+[  1169s]   E3 40/100 (usable 38)
+[  1240s]   E3 50/100 (usable 48)
+[  1306s]   E3 60/100 (usable 57)
+[  1361s]   E3 70/100 (usable 67)
+[  1420s]   E3 80/100 (usable 77)
+[  1469s]   E3 90/100 (usable 86)
+[  1521s]   E3 100/100 (usable 95)
+[  1527s]   E4 9/40
+[  1535s]   E4 13/40
+[  1544s]   E4 15/40
+[  1548s]   E4 17/40
+[  1558s]   E4 19/40
+[  1564s]   E4 20/40
+[  1576s]   E4 22/40
+[  1584s]   E4 23/40
+[  1591s]   E4 31/40
+[  1601s]   E4 33/40
+[  1609s]   E4 36/40
+[  1614s]   E4 39/40
+[  1621s]   E4 40/40
+[  1622s] done

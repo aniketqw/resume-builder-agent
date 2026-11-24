@@ -1,0 +1,350 @@
+=====================================================================
+EVALUATING THE v2 RESUME-BUILDER ATS SCORER ON PUBLIC BENCHMARKS
+A literature-survey style write-up
+=====================================================================
+Status: COMPLETE for scoring-vs-labels (all three datasets, full sets)
+and for the edit experiments on cnamuangtoun and 0xnbk. The edit
+experiments were NOT run on netsol (see 6.3).
+
+---------------------------------------------------------------------
+1. WHAT THE ATS SCORER IS (what was happening in our resume builder)
+---------------------------------------------------------------------
+The scorer (v2/src/rba/ats/, v2/src/rba/resume/) takes a resume and a job
+description (JD) and returns one number. It uses NO language-model call at
+scoring time; it is arithmetic, so the same input always gives the same
+score. It fuses three independent "channels" with a weighted sum:
+
+  Channel   Weight  What it measures
+  -------   ------  --------------------------------------------------
+  Dense     0.5     Semantic similarity. The text is turned into a
+                    vector by the BAAI/bge-small-en-v1.5 model (run via
+                    ONNX) and compared to the JD vector by cosine.
+                    Long resumes are cut into chunks (one per section or
+                    entry) and the chunk vectors are averaged, because
+                    the model only reads about 512 tokens at a time.
+  Lexical   0.2     BM25 keyword overlap between resume and JD, scored
+                    against a background corpus of other job texts.
+  Skills    0.3     Weighted coverage of the JD's skills by the
+                    resume's skills, using a curated alias table
+                    (e.g. "JS" = "JavaScript").
+
+If a channel is unavailable (for example the JD names no known skill),
+its weight is shared across the others rather than counted as zero.
+The weighted sum (a "convex combination") is chosen over Reciprocal Rank
+Fusion following Bruch et al., "An Analysis of Fusion Functions for
+Hybrid Retrieval" (arXiv 2210.11934), as cited in the project's own
+ANALYSIS.md. The overall design follows the second-place system at the
+TalentCLEF 2026 resume-ranking task, per the project's own notes.
+
+Per-bullet feedback. The app shows, for every bullet, "how much would
+my score change if this line were removed". This is exact leave-one-out:
+remove the bullet, re-score, subtract (resume/attribution.py). Bullets
+whose removal RAISES the score are flagged as harmful.
+
+Known limitation, stated in the project's own code: the number is
+NOT calibrated against real hiring outcomes. No public English dataset
+has real hiring outcomes, so the score is a similarity measure, not a
+probability of getting an interview.
+
+---------------------------------------------------------------------
+2. WHAT WE SET OUT TO TEST, AND WHY
+---------------------------------------------------------------------
+Two questions:
+
+  Q1 (agreement). Do the scorer's numbers agree with human/LLM-judged
+     fit labels on public resume-JD datasets?
+  Q2 (editing). When the app says "adding or removing this bullet
+     helps", is that actually true, and does it help for the RIGHT
+     reason (relevance) rather than a side effect (length, keywords)?
+
+Public datasets have no "before and after an edit" labels, so Q2 is
+answered with controlled experiments: edit a real resume, re-score,
+and compare with the unedited version (a paired design).
+
+---------------------------------------------------------------------
+3. THE DATASETS: WHAT THEY ARE AND HOW RELEVANT THEY ARE
+---------------------------------------------------------------------
+All three were downloaded and inspected before use. Counts below are
+what we actually loaded, not just what the dataset cards claim.
+
+3.1 0xnbk/resume-ats-score-v1-en  -- PRIMARY
+  - 6,374 resume+JD pairs (5,099 train + 1,275 validation).
+  - Stored as ONE text column; resume and JD are joined by the literal
+    marker " SEP " (exactly one per row). We split on it.
+  - Labels: a continuous ATS-style score (19.2 to 90.1) and a tier:
+    No Fit 3,206 / Potential Fit 1,592 / Good Fit 1,576.
+  - Mean label score by tier: No 24.9, Potential 54.8, Good 84.9.
+  - Why relevant: its label is the same kind of thing our scorer
+    outputs, so rank correlation is a meaningful test.
+  - Caveat: labels are LLM-generated/synthetic, not recruiter outcomes.
+
+3.2 cnamuangtoun/resume-job-description-fit  -- PRIMARY (second opinion)
+  - 8,000 pairs (6,241 train + 1,759 test), 3-class labels:
+    No Fit 4,000 / Potential Fit 2,000 / Good Fit 2,000.
+  - Only 345 unique job descriptions; most JDs appear ~10 times with
+    different resumes. This is useful for our edit experiments (many
+    resumes per JD) but means the JD variety is small.
+  - OVERLAP WARNING: about 48% of 0xnbk's resumes (3,066 of 6,374) also
+    appear here. The two datasets are NOT independent evidence.
+
+3.3 netsol/resume-score-details  -- PARTLY RELEVANT
+  - About 1,031 JSON files: match (648), mismatch (201), and several
+    deliberately broken "invalid"/"gibberish" inputs (~140).
+  - Each has a resume, a JD, and GPT-4o rubric scores per criterion.
+  - Loads only by reading the raw JSON (the standard loader fails).
+  - Use: check ordering match > mismatch > invalid. The per-criterion
+    rubric cannot be compared because our scorer has no criteria.
+  - Privacy: files contain real-looking names/contact details; the
+    harness never reads those fields.
+
+Considered and NOT used (and why):
+  - resume-ner-bert-v2: tests entity extraction (NER); our scorer does
+    no NER. Not relevant to scoring.
+  - Kaggle amaymishra11: its "label" is TF-IDF similarity, close to our
+    own keyword channel, so agreement would be circular.
+  - JobResQA: only 105 synthetic pairs, 5 languages; our embedding model
+    is English-only. Too small for accuracy claims; possible later use
+    as a fairness (demographic-swap) check.
+  - Djinni-CB: relevant in principle (keyword vs holistic reasoning) but
+    obtained via a paper, not a simple download. Deferred.
+
+---------------------------------------------------------------------
+4. WHAT WE DID (METHOD)
+---------------------------------------------------------------------
+4.1 Adapter. Dataset resumes are mostly plain prose without bullet
+    markers. v2's own text parser expects bullets, so we split each
+    resume into sentence-sized "bullets" (max 60 words) and group them
+    six to an entry. Grouping matters: without it the dense channel
+    would see only the first 512 tokens. All scoring still goes through
+    v2's real scoring functions, not a re-implementation.
+
+4.2 Skills channel without an LLM. The datasets provide no structured
+    skills. We take every skill the JD names from v2's alias table and
+    treat them all as "required". Consequence: the skills channel works
+    only for JDs that mention known tech skills; for others it drops out
+    (see "skills_channel_coverage" in results: 64-67% of pairs had it).
+
+4.3 Part A: agreement with labels. Score every pair, then measure:
+    Spearman/Kendall rank correlation with the continuous label, AUC for
+    tier pairs (Good vs No Fit etc.), tier means, and macro-F1 with score
+    cut-offs fitted on a random half and tested on the other half.
+    Compared against baselines: TF-IDF cosine and raw bge-small cosine,
+    and an ablation of each channel. Bootstrap 95% confidence intervals.
+
+4.4 Part B: bullet-edit experiments (paired, same resume before/after):
+  E1 Dose-response. Add k = 1..5 bullets to weak (No/Potential Fit)
+     resumes. "Relevant" bullets come from a Good-Fit resume for the same
+     JD. "Irrelevant" bullets come from a Good-Fit resume for a different
+     JD, matched to the same length.
+  E2 Gap-closing. Add 5 same-JD good-fit bullets to a Potential-Fit
+     resume; measure the share of the score gap to that good-fit resume
+     recovered.
+  E3 Pruning. Remove k = 1, 3, 5 bullets: ones the scorer flags as
+     harmful, random ones, or the ones it rates most helpful.
+  E3b Planted bullets. Hide 3 relevant and 3 irrelevant bullets in a
+     resume; can the per-bullet numbers find them (AUC; 0.5 = chance)?
+  E4 Budget. Keep only B = 6/10/15 bullets chosen by the scorer's
+     best-first selection vs random vs original order.
+  E5 Gaming control. Add one fake "bullet" made only of the JD's most
+     frequent words; compare with a genuine relevant bullet.
+  E6 Fidelity. The app's per-bullet delta vs an independent re-score.
+
+---------------------------------------------------------------------
+5. WHAT WE EXPECTED TO SEE (the "should be" observation)
+---------------------------------------------------------------------
+For a scorer that really measures fit to a job:
+  A1. Scores rise with the label: No Fit < Potential < Good, with a
+      clear rank correlation to the dataset's own score, and better
+      than a plain TF-IDF baseline.
+  A2. Adding relevant bullets raises the score steadily with k.
+  A3. Adding irrelevant (other-job) bullets changes it little or lowers
+      it. The GAP between the relevant and irrelevant curves is the
+      evidence that the score tracks relevance.
+  A4. A keyword-stuffed non-sentence should NOT beat a real, relevant
+      bullet.
+  A5. Removing flagged-harmful bullets raises the score; removing random
+      ones is about neutral or slightly negative; removing the most
+      helpful ones hurts most.
+  A6. Per-bullet numbers identify planted relevant bullets as helpful
+      (AUC well above 0.5) and planted irrelevant ones as harmful.
+  A7. Per-bullet deltas equal an independent re-score.
+  A8. Best-first selection at a bullet budget beats random selection.
+
+---------------------------------------------------------------------
+6. WHAT WE ACTUALLY OBSERVED
+---------------------------------------------------------------------
+6.1 Edit experiments on cnamuangtoun (100 weak-resume targets per
+    experiment, mean change in score points out of 100)  -- COMPLETE
+  E1 add relevant   k=1..5: +0.43 +1.02 +1.40 +1.73 +2.11
+     add irrelevant k=1..5: +0.66 +1.15 +1.57 +2.07 +2.46
+     Same test with the skills channel removed (dense+lexical only):
+     relevant +0.29..+0.92, irrelevant +0.23..+0.68.
+  E5 stuffed fake bullet +1.19; genuine relevant bullet +0.43.
+  E2 closes a median 27% of the gap (49 usable pairs); adding the
+     bullets reached the midpoint to the good-fit resume in 41%.
+  E3 remove 5 bullets: flagged-harmful +1.13, random -1.08,
+     most-helpful -4.53. (k=1: +0.55 / -0.17 / -2.20.)
+     Share of bullets flagged harmful: about 42% per resume.
+  E3b planted-bullet AUC: relevant 0.60, irrelevant 0.42.
+  E4 keep 6 bullets: best-first 50.0, random 42.6, original order 41.0
+     (23 resumes). Similar at 10 and 15.
+  E6 max difference between app delta and independent re-score:
+     5e-5 points (rounding level).
+
+6.2 Scoring vs labels (Part A)  -- COMPLETE, full datasets
+    Spearman = rank correlation with the dataset's continuous score
+    (1.0 perfect, 0 none). AUC = chance a higher-tier pair outscores a
+    lower-tier one (0.5 = coin flip, 1.0 perfect). 95% intervals are
+    all under +/-0.03 for the two large datasets.
+
+    0xnbk (6,374 pairs)       Spearman   AUC Good-vs-No  AUC Good-vs-Pot
+      lexical (BM25) only      0.19        0.65            0.57
+      dense only               0.28        0.70            0.55
+      dense + lexical          0.29        0.71            0.56
+      FULL 3 channels (prod.)  0.14        0.59            0.49
+      baseline TF-IDF cosine   0.24        0.68            0.58
+      baseline raw bge cosine  0.29        0.71            0.56
+    Mean raw score by tier (full): No 0.473, Potential 0.507, Good 0.505.
+    Tier cut-offs fitted on half the data and tested on the other half:
+      macro-F1 0.37 (full) to 0.43 (dense+lexical); always guessing the
+      biggest class gets 50% accuracy, and the scorer gets 45-46%.
+
+    cnamuangtoun (8,000 pairs; no continuous label, so no Spearman)
+      lexical 0.63 | dense 0.68 | dense+lexical 0.69 | FULL 0.59 |
+      TF-IDF 0.66 | raw bge 0.69   (all AUC Good vs No Fit)
+      Good vs Potential: full 0.50, dense+lexical 0.54.
+
+    netsol (991 usable files: 648 match, 201 mismatch, 142 invalid)
+      Spearman vs its GPT-4o macro score: dense+lexical 0.48, TF-IDF 0.47,
+      full 0.39, raw bge 0.34.
+      "match" vs "mismatch" AUC: dense 0.71, dense+lexical 0.71, full 0.57.
+      Invalid inputs (e.g. a gibberish job description) scored HIGHER
+      than valid ones: AUC of match-vs-invalid is only 0.20-0.23, i.e.
+      well BELOW chance. Mean lexical score: invalid 0.73 vs match 0.13.
+      Cause not yet confirmed; likely rare made-up words get a very high
+      keyword weight. Needs a dedicated check.
+
+6.3 Edit experiments on 0xnbk (100 weak targets; 95 for pruning)
+    -- COMPLETE.  netsol: NOT RUN (its files are one-off pairs without
+    several resumes per JD, so "same-JD relevant bullets" can't be built
+    the same way).
+  E1 add relevant   k=1..5: +0.85 +1.73 +2.27 +2.96 +3.48
+     add irrelevant k=1..5: +0.58 +1.45 +1.84 +2.52 +2.59
+     Skills channel removed: relevant +0.34..+1.04,
+                             irrelevant +0.28..+0.82.
+  E5 stuffed fake bullet +1.43; genuine relevant bullet +0.85.
+  E2 median 52% of the gap recovered (40 usable pairs); 52% of pairs
+     reached the midpoint to the good-fit resume.
+  E3 remove 5 bullets: flagged-harmful +1.36, random -0.83,
+     most-helpful -4.07 (k=1: +0.63 / -0.29 / -2.08).
+     About 42% of bullets flagged harmful per resume.
+  E3b planted-bullet AUC: relevant 0.64, irrelevant 0.43.
+  E4 keep 6 bullets: best-first 54.4, random 47.0, original order 46.7
+     (13 resumes; small sample).
+  E6 max gap between app delta and independent re-score: 5e-5 points.
+  Summary: same pattern as cnamuangtoun, except relevant bullets now
+  clearly beat irrelevant ones at k=5 (+3.48 vs +2.59) -- but the
+  irrelevant ones still add a lot, and stuffing still wins.
+
+---------------------------------------------------------------------
+7. WHAT THE CURRENT OBSERVATIONS MEAN (observed vs expected)
+---------------------------------------------------------------------
+  Expectation                     cnamuangtoun      0xnbk          Verdict
+  A1 score rises with the label   AUC 0.59 (full)   0.59 (full);   PARTLY: weak
+     and beats TF-IDF             TF-IDF 0.66       TF-IDF 0.68    and WORSE
+                                                                    than TF-IDF
+  A2 relevant adds help steadily  +2.1 at k=5       +3.5 at k=5    MET
+  A3 irrelevant adds ~0 / negative +2.5 at k=5      +2.6 at k=5    NOT MET
+  A4 stuffed text < real bullet   +1.19 vs +0.43    +1.43 vs +0.85 NOT MET
+  A5 harmful>random>helpful       +1.13/-1.08/-4.53 +1.36/-0.83/   MET
+                                                      -4.07
+  A6 planted bullets identified   0.60 / 0.42       0.64 / 0.43    NOT MET
+  A7 delta equals re-score        5e-5 diff         5e-5 diff      MET
+  A8 selection beats random       50.0 vs 42.6      54.4 vs 47.0   MET
+
+New, larger finding from Part A (6.2) that the edit tests did not show:
+  - The scorer's AGREEMENT with the labels is weak. Best Spearman is
+    0.29 (0.48 on netsol). The most informative single channel is the
+    dense one; plain TF-IDF and a raw embedding cosine do about as well.
+  - The full three-channel score, which is what the product shows, is
+    WORSE than dense+lexical on every dataset (Spearman 0.14 vs 0.29 on
+    0xnbk; AUC Good-vs-Potential 0.49, i.e. no better than a coin flip).
+    So the skills channel (30% of the score) is lowering agreement with
+    these labels, not raising it. Caveat: our skills input here is a
+    crude stand-in (every skill the JD names counts as required), so
+    this may understate the channel when real extracted skills are used.
+  - The separation between tiers is small in absolute terms: mean raw
+    score 0.47 / 0.51 / 0.51 for No / Potential / Good. Potential and
+    Good are not separated at all.
+  - On netsol, invalid inputs (gibberish JD) get HIGH scores. A scorer
+    used for gatekeeping would pass garbage.
+
+Reading in plain terms:
+  - The scorer is INTERNALLY CONSISTENT. Its leave-one-out numbers are
+    exact, its "remove this" advice really does raise the score, and its
+    best-first selection beats random.
+  - It does NOT yet clearly separate RELEVANT from IRRELEVANT content
+    when text is added. Unrelated bullets raised the score as much as
+    relevant ones. With the skills channel removed the gap reverses
+    slightly in favour of relevant bullets (0.92 vs 0.68 at k=5), so the
+    skills channel looks like a main source of the problem: the other
+    resume's bullets name skills, and the JD-skill list is broad, so
+    skills credit can come from content that is off-topic overall.
+    This is a hypothesis; we have not yet isolated it with a skills-off
+    run of every experiment.
+  - A bullet made only of keywords can beat a genuine bullet, so the
+    score can be gamed by keyword stuffing.
+  - Per-bullet helps/hurts numbers measure "does this bullet raise the
+    scorer's number", which is not the same as "is this bullet about the
+    right job" (planted-bullet AUC near or below chance).
+
+---------------------------------------------------------------------
+8. THREATS TO VALIDITY (read before quoting any number)
+---------------------------------------------------------------------
+  - Labels are synthetic/LLM-generated. Agreement with them means the
+    scorer ranks like the labeler, not that a recruiter would agree.
+  - 0xnbk and cnamuangtoun share ~48% of resumes: not independent.
+  - cnamuangtoun has only 345 unique JDs, so JD variety is limited.
+  - Our adapter splits prose into sentences; real resumes with real
+    bullets and dates may behave differently.
+  - Our "required skills = every skill the JD names" is a crude
+    stand-in for real extraction, and may inflate the skills channel.
+  - 100 targets per experiment and one random seed: wide confidence
+    intervals on small effects (E1 at k=1 especially).
+  - "Irrelevant" bullets come from Good-Fit resumes, so they are
+    well-written resume text. That may make them look better to the
+    dense channel than a typical random bullet would.
+  - These tests cannot say whether a score gain helps in a real hiring
+    pipeline. A small hand-labelled set of real resumes reviewed by
+    recruiters is still the recommended final check.
+
+---------------------------------------------------------------------
+9. SUGGESTED NEXT STEPS
+---------------------------------------------------------------------
+  1. Investigate why the skills channel lowers agreement (Part A) and
+     test with properly extracted skills (Ollama/Groq) instead of the
+     "every JD skill is required" shortcut.
+  2. Investigate the gibberish-JD result on netsol (suspected rare-word
+     inflation in the keyword channel) and add an input-validity guard.
+  2b. Run E1/E5 with the skills channel fully off in every experiment
+     (so far only the sensitivity curves were), to confirm where the
+     irrelevant-bullet gain comes from.
+  3. If confirmed, consider a relevance-aware skills credit (only count
+     skills the JD asks for AND that appear in context), and a guard for
+     bullets with no sentence structure (the keyword-stuffing case).
+  4. Add a hand-labelled real-resume check.
+
+---------------------------------------------------------------------
+10. REFERENCES (only what we actually relied on)
+---------------------------------------------------------------------
+  [1] Bruch et al., An Analysis of Fusion Functions for Hybrid
+      Retrieval, arXiv 2210.11934 (cited in v2/ANALYSIS.md).
+  [2] TalentCLEF 2026, Task A, arXiv 2606.31692 (cited in
+      v2/src/rba/ats/__init__.py).
+  [3] Datasets: 0xnbk/resume-ats-score-v1-en;
+      cnamuangtoun/resume-job-description-fit;
+      netsol/resume-score-details (all on Hugging Face).
+  [4] Model: BAAI/bge-small-en-v1.5.
+  Reproduce: v2/benchmarks/ (run_score.py, run_edits.py, report.py);
+  results in v2/benchmarks/results/.
+=====================================================================
