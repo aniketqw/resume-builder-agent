@@ -1,0 +1,25 @@
+Fetching 1031 files:   0%|          | 0/1031 [00:00<?, ?it/s]Fetching 1031 files:  71%|███████   | 729/1031 [00:00<00:00, 7276.91it/s]Fetching 1031 files: 100%|██████████| 1031/1031 [00:00<00:00, 7203.85it/s]
+158 unique JDs to extract; cache /Users/aniketsaxena/Documents/p/from_aug_1/p2/resume-builder-agent/.claude/worktrees/ats-resume-job-benchmarks-ea8d96/v2/benchmarks/results/jd_skills_cache.json
+skill extraction via glm-5.3:cloud failed: timed out
+skill extraction via glm-5.3:cloud failed: timed out
+skill extraction via glm-5.3:cloud failed: timed out
+  10/158 failed=0 239s
+  20/158 failed=0 323s
+  30/158 failed=0 393s
+  40/158 failed=0 424s
+  50/158 failed=0 480s
+  60/158 failed=0 516s
+  70/158 failed=0 589s
+skill extraction via glm-5.3:cloud failed: timed out
+skill extraction via glm-5.3:cloud failed: timed out
+  80/158 failed=0 726s
+skill extraction via glm-5.3:cloud failed: timed out
+skill extraction via glm-5.3:cloud failed: timed out
+  90/158 failed=0 960s
+  100/158 failed=0 1162s
+  110/158 failed=1 1312s
+  120/158 failed=2 1554s
+  130/158 failed=2 1773s
+  140/158 failed=2 1993s
+  150/158 failed=2 2236s
+done: 158 JDs, 2 failed, 2345s

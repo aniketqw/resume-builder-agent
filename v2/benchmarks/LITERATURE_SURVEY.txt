@@ -319,7 +319,53 @@ Reading in plain terms:
     recruiters is still the recommended final check.
 
 ---------------------------------------------------------------------
-9. SUGGESTED NEXT STEPS
+9. IMPROVEMENTS WE BUILT AND TESTED (opt-in, existing code untouched)
+---------------------------------------------------------------------
+All fixes live in one new module, v2/src/rba/ats/improved.py. No existing
+module imports it (a unit test enforces this), every fix is off by default
+(Fixes()), and Fixes.all() turns them on. Benchmark code: extract_skills.py,
+run_improved.py, analyze_improved.py, run_edits.py --scorer baseline|L|R.
+LLM use: JD text only (public data), local llama3.1 via Ollama (cloud models
+timed out); resumes are never sent to an LLM.
+
+P1 LLM-extracted JD skills + deterministic match in the resume text.
+P2 Top-k dense chunk pooling.        P3 Keyword-stuffing guard.
+P4 Input-validity guard + capped BM25 IDF for unseen words.
+P5 Requirement-by-requirement matching.
+
+9.1 Agreement with labels (60 JDs per dataset; ~1,300 pairs each)
+  Baseline -> fix:
+  - P1: 0xnbk Spearman 0.149 -> 0.257, AUC Good-vs-No 0.62 -> 0.73;
+        cnamuangtoun AUC 0.56 -> 0.69; netsol Spearman 0.35 -> 0.40.
+        CLEAR WIN. Coverage of LLM skills: 100% / 71% / 99%.
+  - P2: no change.  P3: no change (affects only 3/3/68 pairs).
+  - P4: neutral on 0xnbk and cnamuangtoun; netsol AUC Good-vs-No
+        0.19 -> 0.90 (guard rejected 107/875 netsol pairs, 1/1385 0xnbk).
+        CAVEAT: the same-text rule and thresholds were tuned on netsol, so
+        this is not evidence for unseen data.
+  - P5: did not help (alone Spearman 0.03 on 0xnbk; fitted weight 0).
+  - All fixes with weights fitted on 0xnbk (dense .71, lexical .19,
+    skills .10): not better than P1 alone (0.231 vs 0.257).
+
+9.2 Edit experiments (cnamuangtoun, 81 pairs, same targets for all)
+                          baseline   L (P1)    R (recommended set)
+  +5 relevant bullets       +4.26    +2.13     +2.13
+  +5 irrelevant bullets     +3.54    +1.33     +1.35
+  relevant / irrelevant      1.2x     1.6x      1.6x
+  stuffed fake bullet       +0.73    +0.82     +0.04
+  genuine bullet            +1.10    +0.55     +0.62
+  gap closing (median)       78%      10%       28%
+  Reading: the stuffing guard (P3) works. Irrelevant bullets still raise
+  the score, but the gap to relevant ones widened (mostly from P1). The
+  old gap-closing figure was inflated by the skills shortcut.
+  Not run: E3 pruning and E4 budget under the fixed scorers; netsol edits.
+
+9.3 Verdict
+  Keep P1, P3, P4 (P4 with the tuning caveat). Drop or rethink P2 and P5.
+  Limits: small subsets, one dataset for edits, one seed, local llama3.1.
+
+---------------------------------------------------------------------
+10. SUGGESTED NEXT STEPS
 ---------------------------------------------------------------------
   1. Investigate why the skills channel lowers agreement (Part A) and
      test with properly extracted skills (Ollama/Groq) instead of the
@@ -335,7 +381,7 @@ Reading in plain terms:
   4. Add a hand-labelled real-resume check.
 
 ---------------------------------------------------------------------
-10. REFERENCES (only what we actually relied on)
+11. REFERENCES (only what we actually relied on)
 ---------------------------------------------------------------------
   [1] Bruch et al., An Analysis of Fusion Functions for Hybrid
       Retrieval, arXiv 2210.11934 (cited in v2/ANALYSIS.md).
@@ -345,6 +391,7 @@ Reading in plain terms:
       cnamuangtoun/resume-job-description-fit;
       netsol/resume-score-details (all on Hugging Face).
   [4] Model: BAAI/bge-small-en-v1.5.
-  Reproduce: v2/benchmarks/ (run_score.py, run_edits.py, report.py);
+  Reproduce: v2/benchmarks/ (run_score.py, run_edits.py, report.py,
+  extract_skills.py, run_improved.py, analyze_improved.py);
   results in v2/benchmarks/results/.
 =====================================================================

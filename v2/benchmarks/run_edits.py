@@ -38,13 +38,39 @@ RESULTS = Path(__file__).parent / "results"
 KS = [0, 1, 2, 3, 4, 5]
 
 
+SC: dict = {"fn": None}
+
+
+def make_scorer(name: str):
+    """None = the product scorer; otherwise an opt-in `improved` variant.
+
+    L = only the LLM-skills fix; R = recommended set (LLM skills, top-k dense,
+    capped BM25, stuffing guard, validity guard; no requirement matching).
+    """
+    if name == "baseline":
+        return None
+    from rba.ats import improved
+    fixes = {"L": improved.Fixes(llm_skills=True),
+             "R": improved.Fixes(llm_skills=True, topk_pooling=True, capped_lexical=True,
+                                 stuffing_guard=True, validity_guard=True)}[name]
+    scorer = improved.ImprovedScorer(fixes, cache=adapter.CACHE, skills_fn=improved.cached_jd_skills)
+
+    def fn(doc, jd):
+        return scorer.score(doc, jd, required_skills=adapter.jd_skills(jd)).raw
+    return fn
+
+
 def S(doc_list, jd):
-    """Product score (x100) for each doc."""
+    """Score (x100) for each doc with the selected scorer."""
+    if SC["fn"]:
+        return [SC["fn"](d, jd) * 100 for d in doc_list]
     return [s.raw * 100 for s in adapter.score_docs(doc_list, jd)]
 
 
 def S2(doc_list, jd):
     """Sensitivity: dense+lexical only (skills channel excluded)."""
+    if SC["fn"]:
+        return S(doc_list, jd)
     return [adapter.fuse(s.channels, "dense+lexical") * 100
             for s in adapter.score_docs(doc_list, jd)]
 
@@ -268,7 +294,12 @@ def main(argv=None) -> None:
     ap.add_argument("--n", type=int, default=100, help="targets per experiment")
     ap.add_argument("--n-budget", type=int, default=20, help="resumes for E4 (slow)")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--scorer", default="baseline", choices=["baseline", "L", "R"])
+    ap.add_argument("--only", default="all", help="'all' or comma list of e1,e2")
+    ap.add_argument("--cached-skills-only", action="store_true",
+                    help="only targets whose JD has LLM skills in the cache (same targets for every scorer)")
     args = ap.parse_args(argv)
+    SC["fn"] = make_scorer(args.scorer)
     rng = random.Random(args.seed)
     t0 = time.time()
 
@@ -286,7 +317,12 @@ def main(argv=None) -> None:
     mid = [p for p in pairs if p.tier == 1]
     rng.shuffle(low); rng.shuffle(mid)
     # Only targets whose JD has same-JD Good-Fit resumes can get "relevant" bullets.
-    elig = lambda ps: [p for p in ps if pools.same_jd(p)]
+    if args.cached_skills_only:
+        from rba.ats import improved
+        has = lambda p: improved.cached_jd_skills(p.jd) is not None
+    else:
+        has = lambda p: True
+    elig = lambda ps: [p for p in ps if has(p) and pools.same_jd(p)]
     t_low, t_mid = elig(low)[:args.n], elig(mid)[:args.n]
     log(f"{args.dataset}: {len(pairs)} pairs; eligible No-Fit {len(t_low)}, Potential {len(t_mid)}")
 
@@ -307,16 +343,25 @@ def main(argv=None) -> None:
         for kind in res["gaming"]:
             res["gaming"][kind] += tier["gaming"][kind]
     res["e2"] = e2(t_mid, pools, rng, log)
-    prune_set = rng.sample(pairs, min(args.n, len(pairs)))
-    res["e3"] = e3_e3b_e6(prune_set, pools, rng, log)
-    res["e4"] = e4(prune_set[:args.n_budget * 2], rng, log) if args.n_budget else {}
+    if args.only != "all":
+        res["e3"] = {"prune": {k: {"harmful": [], "random": [], "helpful": []} for k in (1, 3, 5)},
+                     "n_total": 0, "n_with_harm": 0, "harm_share": [],
+                     "planted_auc": {"relevant": [], "irrelevant": []},
+                     "planted_precision_at3": {"relevant": [], "irrelevant": []},
+                     "fidelity_max_abs_diff": [], "sum_vs_joint": []}
+        res["e4"] = {}
+    else:
+        prune_set = rng.sample(pairs, min(args.n, len(pairs)))
+        res["e3"] = e3_e3b_e6(prune_set, pools, rng, log)
+        res["e4"] = e4(prune_set[:args.n_budget * 2], rng, log) if args.n_budget else {}
+    suffix = "" if args.scorer == "baseline" and not args.cached_skills_only else f"_{args.scorer}_cs"
     summ = summarise({**res, "curves": {k: dict(v) for k, v in res["curves"].items()},
                       "curves2": {k: dict(v) for k, v in res["curves2"].items()}})
     RESULTS.mkdir(parents=True, exist_ok=True)
-    (RESULTS / f"edits_{args.dataset}.json").write_text(json.dumps(
+    (RESULTS / f"edits_{args.dataset}{suffix}.json").write_text(json.dumps(
         {"summary": summ, "n_targets": res["n_targets"], "n_pairs": res["n_pairs"],
          "eligible": {k: v["eligible"] for k, v in res["by_tier"].items()}}, indent=1, default=float))
-    (RESULTS / f"edits_{args.dataset}_raw.json").write_text(json.dumps(
+    (RESULTS / f"edits_{args.dataset}{suffix}_raw.json").write_text(json.dumps(
         {"curves": {k: {str(i): v for i, v in d.items()} for k, d in res["curves"].items()},
          "gaming": res["gaming"], "e2": res["e2"], "e3": res["e3"], "e4": res["e4"]},
         default=float))

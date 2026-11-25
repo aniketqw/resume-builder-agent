@@ -1,0 +1,11 @@
+Fetching 1031 files:   0%|          | 0/1031 [00:00<?, ?it/s]Fetching 1031 files:  32%|███▏      | 334/1031 [00:00<00:00, 3336.79it/s]Fetching 1031 files:  65%|██████▍   | 668/1031 [00:00<00:00, 2341.41it/s]Fetching 1031 files:  91%|█████████ | 937/1031 [00:00<00:00, 2469.87it/s]Fetching 1031 files: 100%|██████████| 1031/1031 [00:00<00:00, 2421.69it/s]
+netsol: 875 pairs over 60 JDs
+  100/875  0.3 pairs/s
+  200/875  0.4 pairs/s
+  300/875  0.5 pairs/s
+  400/875  0.7 pairs/s
+  500/875  0.9 pairs/s
+  600/875  1.0 pairs/s
+  700/875  1.1 pairs/s
+  800/875  0.9 pairs/s
+done

@@ -105,6 +105,19 @@ def load_netsol() -> list[Pair]:
     return pairs
 
 
+def jd_subset(pairs: list[Pair], n_jds: int = 60, seed: int = 0) -> list[Pair]:
+    """All pairs whose JD is one of `n_jds` deterministically chosen JDs.
+
+    Used by the LLM-skills experiment: the model is called once per unique JD,
+    so bounding the JD count bounds the (slow) LLM work.
+    """
+    import hashlib
+    groups = sorted({p.group for p in pairs},
+                    key=lambda g: hashlib.sha256(f"{seed}|{g}".encode()).hexdigest())
+    keep = set(groups[:n_jds])
+    return [p for p in pairs if p.group in keep]
+
+
 def subsample(pairs: list[Pair], n: int | None, seed: int = 0) -> list[Pair]:
     """Deterministic stratified-by-tier subsample (all pairs when n is None)."""
     if not n or n >= len(pairs):
