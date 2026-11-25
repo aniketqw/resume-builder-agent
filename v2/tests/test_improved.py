@@ -15,9 +15,9 @@ def _doc(*texts):
 
 def test_defaults_are_off():
     f = improved.Fixes()
-    assert not any([f.validity_guard, f.capped_lexical, f.topk_pooling,
-                    f.stuffing_guard, f.llm_skills, f.requirement_match])
-    assert all([improved.Fixes.all().stuffing_guard, improved.Fixes.all().llm_skills])
+    assert not any([f.validity_guard, f.capped_lexical, f.stuffing_guard, f.llm_skills])
+    r = improved.Fixes.recommended()
+    assert all([r.validity_guard, r.capped_lexical, r.stuffing_guard, r.llm_skills])
 
 
 def test_existing_modules_do_not_import_improved():
@@ -52,11 +52,6 @@ def test_capped_bm25_does_not_reward_made_up_words():
     assert improved.bm25_capped("", JD) == 0.0
 
 
-def test_requirement_split():
-    reqs = improved.jd_requirements("Skills:\n- 5 years of Python experience\n- AWS\n- Strong SQL and data modelling skills.")
-    assert reqs == ["5 years of Python experience", "Strong SQL and data modelling skills."]
-
-
 def test_skills_from_llm_counts_only_evidenced_skills():
     fake = lambda jd: {"required": ["Python", "Docker"], "preferred": ["Kubernetes"]}
     full = improved.skills_from_llm("Built Python services in Docker containers", JD, extract=fake)
@@ -77,5 +72,13 @@ def test_fuse_redistributes_missing_channels():
     raw, used = improved.fuse({"dense": 0.8, "lexical": 0.4, "skills": None})
     assert abs(raw - (0.5 * 0.8 + 0.2 * 0.4) / 0.7) < 1e-9 and "skills" not in used
     assert improved.fuse({"dense": None})[0] == 0.0
-    raw2, _ = improved.fuse({"dense": 1.0, "req": 0.0}, {"dense": 0.5, "req": 0.5})
+    raw2, _ = improved.fuse({"dense": 1.0, "lexical": 0.0}, {"dense": 0.5, "lexical": 0.5})
     assert raw2 == 0.5
+
+
+def test_isotonic_is_monotone_and_clamped():
+    t = improved.fit_isotonic([0.1, 0.2, 0.3, 0.4], [10, 30, 20, 50])
+    ys = [improved.calibrate(x, t) for x in (0.0, 0.15, 0.25, 0.3, 0.35, 0.9)]
+    assert ys == sorted(ys)
+    assert improved.calibrate(0.0, t) == 10 and improved.calibrate(0.9, t) == 50
+    assert abs(improved.calibrate(0.25, t) - 25) < 1e-9        # 30 and 20 pooled

@@ -44,15 +44,16 @@ SC: dict = {"fn": None}
 def make_scorer(name: str):
     """None = the product scorer; otherwise an opt-in `improved` variant.
 
-    L = only the LLM-skills fix; R = recommended set (LLM skills, top-k dense,
-    capped BM25, stuffing guard, validity guard; no requirement matching).
+    L = only the LLM-skills fix; R = recommended set (LLM skills, capped BM25,
+    stuffing guard, validity guard). D / X / K = R with a single channel
+    (dense / lexical / skills) so a gain can be traced to its channel.
     """
     if name == "baseline":
         return None
     from rba.ats import improved
+    only = {"D": {"dense": 1.0}, "X": {"lexical": 1.0}, "K": {"skills": 1.0}}
     fixes = {"L": improved.Fixes(llm_skills=True),
-             "R": improved.Fixes(llm_skills=True, topk_pooling=True, capped_lexical=True,
-                                 stuffing_guard=True, validity_guard=True)}[name]
+             "R": improved.Fixes.recommended()}.get(name) or improved.Fixes.recommended(weights=only[name])
     scorer = improved.ImprovedScorer(fixes, cache=adapter.CACHE, skills_fn=improved.cached_jd_skills)
 
     def fn(doc, jd):
@@ -294,7 +295,7 @@ def main(argv=None) -> None:
     ap.add_argument("--n", type=int, default=100, help="targets per experiment")
     ap.add_argument("--n-budget", type=int, default=20, help="resumes for E4 (slow)")
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--scorer", default="baseline", choices=["baseline", "L", "R"])
+    ap.add_argument("--scorer", default="baseline", choices=["baseline", "L", "R", "D", "X", "K"])
     ap.add_argument("--only", default="all", help="'all' or comma list of e1,e2")
     ap.add_argument("--cached-skills-only", action="store_true",
                     help="only targets whose JD has LLM skills in the cache (same targets for every scorer)")

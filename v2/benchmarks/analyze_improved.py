@@ -38,8 +38,8 @@ def load_table(ds: str, groups: dict, texts: dict) -> list[dict]:
         row = {"id": r["id"], "ds": ds, "tier": int(b["tier"]), "label": _f(b["label_score"]),
                "in_0xnbk": int(b["in_0xnbk"]), "group": groups[r["id"]],
                "dense": _f(b["dense"]), "lex": _f(b["lexical"]), "skills_old": _f(b["skills"]),
-               "dense_topk": _f(r["dense_topk"]), "lex_capped": _f(r["lex_capped"]),
-               "req": _f(r["req"]), "valid": int(r["valid"]), "n_stuffed": int(r["n_stuffed"])}
+               "lex_capped": _f(r["lex_capped"]),
+               "valid": int(r["valid"]), "n_stuffed": int(r["n_stuffed"])}
         resume, jd = texts[r["id"]]
         row["skills_llm"] = improved.skills_from_llm(resume, jd, extract=improved.cached_jd_skills)
         out.append(row)
@@ -51,21 +51,14 @@ def variants(row: dict, w_fit: dict | None) -> dict[str, float]:
     v = {}
     v["V0 baseline (3-ch, shortcut skills)"] = g({"dense": row["dense"], "lexical": row["lex"], "skills": row["skills_old"]})[0]
     v["V1 +P1 LLM skills"] = g({"dense": row["dense"], "lexical": row["lex"], "skills": row["skills_llm"]})[0]
-    v["V2 +P2 top-k dense"] = g({"dense": row["dense_topk"], "lexical": row["lex"], "skills": row["skills_old"]})[0]
-    v["V3 +P3 stuffing guard"] = v["V0 baseline (3-ch, shortcut skills)"]   # see n_stuffed
     v["V4 +P4 validity + capped BM25"] = (g({"dense": row["dense"], "lexical": row["lex_capped"],
                                             "skills": row["skills_old"]})[0] if row["valid"] else 0.0)
-    v["V5 +P5 requirement match"] = g({"dense": row["dense"], "lexical": row["lex"],
-                                       "skills": row["skills_old"], "req": row["req"]})[0]
-    allf = {"dense": row["dense_topk"], "lexical": row["lex_capped"],
-            "skills": row["skills_llm"], "req": row["req"]}
-    v["V6 all fixes (default weights)"] = g(allf)[0] if row["valid"] else 0.0
+    rec = {"dense": row["dense"], "lexical": row["lex_capped"], "skills": row["skills_llm"]}
+    v["V6 recommended (P1+P3+P4, default weights)"] = g(rec)[0] if row["valid"] else 0.0
     if w_fit:
-        v["V7 all fixes (fitted weights)"] = g(allf, w_fit)[0] if row["valid"] else 0.0
-    # single channels, for the "does this channel carry signal" question
-    for name, key in (("ch: dense top-k", "dense_topk"), ("ch: requirement match", "req"),
-                      ("ch: capped BM25", "lex_capped"), ("ch: LLM skills", "skills_llm"),
-                      ("ch: old dense (mean)", "dense"), ("ch: old BM25", "lex"),
+        v["V7 recommended (fitted weights)"] = g(rec, w_fit)[0] if row["valid"] else 0.0
+    for name, key in (("ch: capped BM25", "lex_capped"), ("ch: LLM skills", "skills_llm"),
+                      ("ch: dense (mean)", "dense"), ("ch: old BM25", "lex"),
                       ("ch: old skills", "skills_old")):
         if row[key] is not None:
             v[name] = row[key]
@@ -73,8 +66,8 @@ def variants(row: dict, w_fit: dict | None) -> dict[str, float]:
 
 
 def fit_weights(rows: list[dict]) -> dict:
-    keys = ["dense_topk", "lex_capped", "skills_llm", "req"]
-    names = ["dense", "lexical", "skills", "req"]
+    keys = ["dense", "lex_capped", "skills_llm"]
+    names = ["dense", "lexical", "skills"]
     ok = [r for r in rows if r["valid"]]
     X = np.array([[0.0 if r[k] is None else r[k] for k in keys] for r in ok])
     mean = X.mean(axis=0)
@@ -86,6 +79,23 @@ def fit_weights(rows: list[dict]) -> dict:
     w = coef / (X.std(axis=0) + 1e-9)            # back to raw-score units
     w = w / w.sum() if w.sum() > 0 else np.full(len(w), 1 / len(w))
     return {n: float(x) for n, x in zip(names, w)}
+
+
+def calibration_check(rows: list[dict]) -> dict:
+    """Fit raw score -> label score on half of the 0xnbk JDs, test on the rest.
+    Reports MAE against predicting the training mean (the 'no model' floor)."""
+    ok = [r for r in rows if r["valid"] and r["label"] is not None]
+    import hashlib
+    half = lambda r: int(hashlib.sha256(r["group"].encode()).hexdigest(), 16) % 2
+    tr = [r for r in ok if half(r) == 0]; te = [r for r in ok if half(r) == 1]
+    rec = lambda r: improved.fuse({"dense": r["dense"], "lexical": r["lex_capped"],
+                                   "skills": r["skills_llm"]})[0]
+    table = improved.fit_isotonic([rec(r) for r in tr], [r["label"] for r in tr])
+    pred = np.array([improved.calibrate(rec(r), table) for r in te])
+    y = np.array([r["label"] for r in te])
+    return {"n_train": len(tr), "n_test": len(te), "table": table,
+            "mae_calibrated": float(np.abs(pred - y).mean()),
+            "mae_train_mean": float(np.abs(np.mean([r["label"] for r in tr]) - y).mean())}
 
 
 def per_jd_auc(rows, scores):
@@ -140,6 +150,12 @@ def main() -> None:
     print("fitted weights (on 0xnbk):", w_fit)
     nbk_groups = {r["group"] for r in train}
     result = {"fitted_weights": w_fit, "datasets": {}}
+    if train:
+        for r in train:
+            r["_v"] = variants(r, w_fit)
+        result["calibration"] = calibration_check(train)
+        c = result["calibration"]
+        print(f"calibration: test MAE {c['mae_calibrated']:.2f} vs train-mean {c['mae_train_mean']:.2f} (label points)")
     for ds, rows in tables.items():
         for r in rows:
             r["_v"] = variants(r, w_fit)

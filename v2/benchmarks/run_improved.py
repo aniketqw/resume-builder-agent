@@ -19,9 +19,8 @@ from rba.ats import improved
 from . import adapter, data
 
 RESULTS = Path(__file__).parent / "results"
-FIELDS = ["id", "valid", "valid_reason", "dense_topk", "lex_capped", "req",
-          "n_stuffed", "ppw_resume", "ppw_jd"]
-FIX = improved.Fixes(topk_pooling=True, capped_lexical=True, requirement_match=True)
+FIELDS = ["id", "valid", "valid_reason", "lex_capped", "n_stuffed", "ppw_resume", "ppw_jd"]
+FIX = improved.Fixes(capped_lexical=True)
 
 
 def load(dataset: str, n_jds: int):
@@ -48,8 +47,7 @@ def main(argv=None) -> None:
         _, removed = improved.drop_stuffed(doc, p.jd)
         feats, _, _ = improved.compute_features(doc, p.jd, FIX, adapter.CACHE)
         rows.append({"id": p.id, "valid": int(ok), "valid_reason": why,
-                     "dense_topk": feats.get("dense"), "lex_capped": feats.get("lexical"),
-                     "req": feats.get("req"), "n_stuffed": removed,
+                     "lex_capped": feats.get("lexical"), "n_stuffed": removed,
                      "ppw_resume": improved.pieces_per_word(p.resume),
                      "ppw_jd": improved.pieces_per_word(p.jd)})
         if (i + 1) % 100 == 0:

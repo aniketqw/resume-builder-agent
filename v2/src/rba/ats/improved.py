@@ -7,16 +7,14 @@ existing test) is exactly as before. To try a fix, build a `Fixes` and use
 `rba.resume.attribution.rescore` and can be dropped in where that is called.
 
 Each fix targets one problem the public-dataset benchmark exposed
-(see benchmarks/LITERATURE_SURVEY.txt):
+(see benchmarks/LITERATURE_SURVEY.txt). Two ideas that were built and
+measured but did not help (top-k dense pooling, requirement-by-requirement
+matching) were removed; see section 9 of the survey.
 
   P1 skills channel hurt agreement    -> `llm_skills`
        JD skills (required/preferred) come from an LLM, cached per JD; the
        resume side is a deterministic text match, so a skill only counts when
        it is evidenced in the resume. One LLM call per JD, none per resume.
-  P2 irrelevant bullets raised score  -> `topk_pooling`
-       Dense similarity = mean of the best-k chunk similarities instead of a
-       length-weighted average of all chunks, so adding off-topic text cannot
-       lift the score by diluting or padding.
   P3 keyword stuffing beat real text  -> `stuffing_guard`
        Lines that are mostly JD vocabulary with almost no sentence structure
        are not scored.
@@ -24,9 +22,6 @@ Each fix targets one problem the public-dataset benchmark exposed
        Inputs whose text fragments into far too many word-pieces are refused
        ("cannot score"), and BM25 gives never-seen words the weight of a
        moderately rare word instead of the maximum.
-  P5 tiers not separated              -> `requirement_match`
-       Each JD requirement line is matched to its best resume line; the score
-       is how well the requirements are covered.
 """
 from __future__ import annotations
 
@@ -38,17 +33,16 @@ import os
 import re
 import threading
 import urllib.request
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 
-from ..resume.chunking import document_chunks
 from ..resume.document import ResumeDoc
 from ..resume.selection import copy_doc
-from .batch import DenseCache, _ensure_chunks_embedded
+from .batch import DenseCache
 from .corpus import background_corpus
-from .dense import embed, tokenizer
+from .dense import tokenizer
 from .lexical import tokenize
 from .skills import weighted_jaccard
 
@@ -65,19 +59,16 @@ BASE_WEIGHTS = {"dense": 0.5, "lexical": 0.2, "skills": 0.3}
 class Fixes:
     validity_guard: bool = False
     capped_lexical: bool = False
-    topk_pooling: bool = False
     stuffing_guard: bool = False
     llm_skills: bool = False
-    requirement_match: bool = False
-    topk: int = 3
-    # Channel weights; None = BASE_WEIGHTS (plus an equal-share "req" channel
-    # when requirement_match is on). Fitted values live in the benchmark results.
+    # Channel weights; None = BASE_WEIGHTS.
     weights: dict | None = None
 
     @classmethod
-    def all(cls, **kw) -> Fixes:
-        return cls(validity_guard=True, capped_lexical=True, topk_pooling=True,
-                   stuffing_guard=True, llm_skills=True, requirement_match=True, **kw)
+    def recommended(cls, **kw) -> Fixes:
+        """The fixes that measurably helped: P1, P3, P4."""
+        return cls(validity_guard=True, capped_lexical=True,
+                   stuffing_guard=True, llm_skills=True, **kw)
 
 
 @dataclass(frozen=True)
@@ -216,75 +207,6 @@ def drop_stuffed(doc: ResumeDoc, jd_text: str) -> tuple[ResumeDoc, int]:
 
 
 # --------------------------------------------------------------------------
-# P2: top-k dense pooling      P5: requirement matching
-# --------------------------------------------------------------------------
-
-_VEC_CACHE: dict[str, np.ndarray] = {}
-_VEC_LOCK = threading.Lock()
-
-
-def _embed_cached(texts: list[str]) -> list[np.ndarray] | None:
-    missing = [t for t in dict.fromkeys(texts) if t not in _VEC_CACHE]
-    if missing:
-        vectors = embed(missing)
-        if vectors is None:
-            return None
-        with _VEC_LOCK:
-            if len(_VEC_CACHE) > 200_000:
-                _VEC_CACHE.clear()
-            for t, v in zip(missing, vectors, strict=True):
-                _VEC_CACHE[t] = v
-    return [_VEC_CACHE[t] for t in texts]
-
-
-def _jd_vec(jd_text: str) -> np.ndarray | None:
-    from ..resume.attribution import _jd_array
-    return _jd_array(jd_text)
-
-
-def dense_topk(doc: ResumeDoc, jd_text: str, k: int = 3,
-               cache: DenseCache | None = None) -> float | None:
-    chunks = tuple(document_chunks(doc))
-    jd = _jd_vec(jd_text)
-    if not chunks or jd is None:
-        return None
-    vectors = _ensure_chunks_embedded([chunks], cache)
-    if vectors is None:
-        return None
-    sims = sorted((max(0.0, float(np.dot(vectors[cid], jd))) for cid, _ in chunks),
-                  reverse=True)
-    return float(np.mean(sims[:k]))
-
-
-def jd_requirements(jd_text: str, limit: int = 30) -> list[str]:
-    """Requirement-sized pieces of a JD: its lines/sentences of 4-60 words."""
-    out: list[str] = []
-    for line in re.split(r"[\n\r]+|(?<=[.;!?])\s+", jd_text):
-        line = line.strip(" -*•\t")
-        n = len(line.split())
-        if 4 <= n <= 60 and line not in out:
-            out.append(line)
-    return out[:limit]
-
-
-def requirement_match(doc: ResumeDoc, jd_text: str) -> float | None:
-    """Mean over JD requirements of the best cosine to any resume line."""
-    reqs = jd_requirements(jd_text)
-    lines = [b.text for b in doc.enabled()]
-    if doc.summary:
-        lines.append(doc.summary)
-    if not reqs or not lines:
-        return None
-    vecs = _embed_cached(reqs + lines)
-    if vecs is None:
-        return None
-    r = np.stack(vecs[:len(reqs)])
-    s = np.stack(vecs[len(reqs):])
-    best = np.clip(r @ s.T, 0.0, None).max(axis=1)
-    return float(best.mean())
-
-
-# --------------------------------------------------------------------------
 # P1: LLM-extracted JD skills, deterministic evidence match on the resume
 # --------------------------------------------------------------------------
 
@@ -417,13 +339,9 @@ def compute_features(doc: ResumeDoc, jd_text: str, fixes: Fixes,
             notes.append(f"ignored {removed} keyword-stuffed line(s)")
     text = work.as_text()
     feats: dict[str, float | None] = {}
-    if fixes.topk_pooling:
-        feats["dense"] = dense_topk(work, jd_text, fixes.topk, cache)
     feats["lexical"] = (bm25_capped(text, jd_text) if fixes.capped_lexical else None)
     if fixes.llm_skills:
         feats["skills"] = skills_from_llm(text, jd_text, extract=skills_fn)
-    if fixes.requirement_match:
-        feats["req"] = requirement_match(work, jd_text)
     return feats, work, tuple(notes)
 
 
@@ -431,8 +349,6 @@ def fuse(feats: dict, weights: dict | None = None) -> tuple[float, dict]:
     """Convex combination of whichever channels are present (None dropped,
     weight redistributed -- same rule as `fusion.convex_fuse`)."""
     w = dict(weights or BASE_WEIGHTS)
-    if weights is None and feats.get("req") is not None:
-        w["req"] = 0.3
     used = {k: v for k, v in feats.items() if v is not None and w.get(k, 0) > 0}
     total = sum(w[k] for k in used)
     if total <= 0:
@@ -443,7 +359,7 @@ def fuse(feats: dict, weights: dict | None = None) -> tuple[float, dict]:
 class ImprovedScorer:
     """Drop-in alternative to `attribution.rescore` with the fixes enabled.
 
-        scorer = ImprovedScorer(Fixes.all())
+        scorer = ImprovedScorer(Fixes.recommended())
         raw, channels = scorer.rescore(doc, jd_text)
 
     Channels a fix does not replace fall back to the default scorer's value, so
@@ -477,3 +393,32 @@ class ImprovedScorer:
     def rescore(self, doc: ResumeDoc, jd_text: str, **kw) -> tuple[float, dict]:
         s = self.score(doc, jd_text, **kw)
         return s.raw, s.channels
+
+
+# --------------------------------------------------------------------------
+# calibration: raw fused score -> expected label score (monotone, no deps)
+# --------------------------------------------------------------------------
+
+def fit_isotonic(scores, targets) -> dict:
+    """Pool-adjacent-violators fit of a non-decreasing map score -> target.
+    Returns {"x": [...], "y": [...]} for `calibrate`."""
+    order = np.argsort(scores)
+    x = np.asarray(scores, float)[order]
+    blocks = [[float(v), 1.0, float(x[i]), float(x[i])]       # mean, weight, xlo, xhi
+              for i, v in enumerate(np.asarray(targets, float)[order])]
+    out: list[list[float]] = []
+    for b in blocks:
+        out.append(b)
+        while len(out) > 1 and out[-2][0] > out[-1][0]:
+            m2, w2, lo2, hi2 = out.pop()
+            m1, w1, lo1, hi1 = out.pop()
+            out.append([(m1 * w1 + m2 * w2) / (w1 + w2), w1 + w2, lo1, hi2])
+    xs, ys = [], []
+    for m, _, lo, hi in out:
+        xs += [lo, hi]; ys += [m, m]
+    return {"x": xs, "y": ys}
+
+
+def calibrate(raw: float, table: dict) -> float:
+    """Map a raw fused score through a `fit_isotonic` table (clamped at the ends)."""
+    return float(np.interp(raw, table["x"], table["y"]))

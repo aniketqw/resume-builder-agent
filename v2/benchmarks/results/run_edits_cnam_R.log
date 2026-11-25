@@ -1,7 +1,7 @@
-[     6s] cnamuangtoun: 8000 pairs; eligible No-Fit 60, Potential 21
-[   116s]   E1 20/60 (eligible 20)
-[   241s]   E1 40/60 (eligible 40)
-[   353s]   E1 60/60 (eligible 60)
-[   457s]   E1 20/21 (eligible 20)
-[   497s]   E2 eligible 21, gap>1pt 11
-[   498s] done
+[     5s] cnamuangtoun: 8000 pairs; eligible No-Fit 60, Potential 21
+[    98s]   E1 20/60 (eligible 20)
+[   204s]   E1 40/60 (eligible 40)
+[   333s]   E1 60/60 (eligible 60)
+[   460s]   E1 20/21 (eligible 20)
+[   490s]   E2 eligible 21, gap>1pt 8
+[   490s] done

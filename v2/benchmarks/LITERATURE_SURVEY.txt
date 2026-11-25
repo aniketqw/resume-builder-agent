@@ -360,8 +360,42 @@ P5 Requirement-by-requirement matching.
   old gap-closing figure was inflated by the skills shortcut.
   Not run: E3 pruning and E4 budget under the fixed scorers; netsol edits.
 
-9.3 Verdict
-  Keep P1, P3, P4 (P4 with the tuning caveat). Drop or rethink P2 and P5.
+9.3 Where do irrelevant-bullet gains come from? (channel isolation)
+  Same targets, R scorer restricted to one channel (cnamuangtoun, k=5):
+                   relevant  irrelevant  ratio
+  baseline           +4.26     +3.54      1.2x
+  R (all channels)   +2.08     +1.28      1.6x
+  dense only         +1.55     +0.93      1.7x
+  keyword only       +0.65     +0.30      2.2x
+  skills only        +3.92     +2.51      1.6x
+  Finding: irrelevant text raises the score in EVERY channel, so it is not
+  one channel's bug. Keyword matching separates best (2.2x) but moves
+  little. The remaining lever is a relevance gate on the gain itself, not
+  a channel swap. (Survey step 2b, "skills off", is now answered.)
+  Note: the R row in 9.2 above used a variant that also had top-k dense
+  pooling; the re-run recommended set without it (this table) gives
+  +2.08 / +1.28 / stuffed +0.04, gap-closing median 6% (top-k variant 28%).
+  Top-k pooling therefore did help gap closing, while changing no
+  label-agreement metric; it was removed to keep the code small and can
+  be restored from git history (commit 86721d9).
+
+9.4 Calibration and fitted weights (0xnbk)
+  Monotone (isotonic) map raw score -> label score, fitted on half of the
+  JDs, tested on the other half: mean error 20.2 label points vs 22.3 for
+  always predicting the mean. A real but small gain: the score is still a
+  rough guide, not a probability. Weights fitted on 0xnbk (dense .81,
+  keyword .11, skills .08): 0xnbk Spearman 0.242 (vs 0.258 default), netsol
+  0.460 (vs 0.395): mixed, so the defaults were kept.
+  Dense alone: Spearman 0.229, AUC Good-vs-No 0.709, close to the full
+  recommended set (0.258 / 0.727): the skills channel adds little here.
+
+9.5 Verdict and what shipped in this branch
+  Shipped as opt-in in src/rba/ats/improved.py: P1 LLM skills, P3 stuffing
+  guard, P4 validity guard + capped BM25 (Fixes.recommended()), plus
+  fit_isotonic / calibrate. Removed: P2 top-k pooling, P5 requirement
+  matching. Existing scorer files are untouched. The v1 prototype was
+  deleted from this branch (still in git history); the secret-scan script
+  moved to scripts/ and CI now runs the secret scan and v2 tests only.
   Limits: small subsets, one dataset for edits, one seed, local llama3.1.
 
 ---------------------------------------------------------------------

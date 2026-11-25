@@ -21,9 +21,7 @@ invented person.*
 This README covers **v2**, the current, actively-developed version — a FastAPI
 service and a browser workbench over a deterministic three-channel ATS scorer,
 plus a LangGraph agent that turns a GitHub account into evidence-linked resume
-content. An earlier Streamlit prototype is kept in [`v1/`](v1/) for history; it
-is not where new work happens. See [`v1/README.md`](v1/README.md) if you need
-it specifically.
+content.
 
 For the full architecture — the LangGraph pipeline, the scoring math with its
 citations, the claim-verification mechanism, and a complete file-by-file
@@ -91,8 +89,8 @@ Full setup, configuration, the API surface, and the test suite:
 ```
 .
 ├── README.md                this file
-├── .github/workflows/       CI runs both versions independently
-├── v1/                      an earlier Streamlit prototype, kept for history
+├── .github/workflows/       CI: secret scan + v2 tests
+├── scripts/                 repo-level tooling (secret scan)
 └── v2/
     ├── ANALYSIS.md          architecture, scoring design, file-by-file reference
     ├── README.md             setup, configuration, API, tests
