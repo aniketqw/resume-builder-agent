@@ -23,7 +23,7 @@ from rba.ats import improved
 from . import adapter, data, metrics
 
 RES = Path(__file__).parent / "results"
-DATASETS = ["0xnbk", "cnamuangtoun", "netsol"]
+DATASETS = ["0xnbk", "cnamuangtoun", "netsol", "screening"]
 
 
 def _f(x):
@@ -140,7 +140,7 @@ def evaluate(rows: list[dict], names: list[str], table: dict, ds: str) -> dict:
 
 def main() -> None:
     base0 = data.load_0xnbk()
-    allp = base0 + data.load_cnamuangtoun(base0) + data.load_netsol()
+    allp = base0 + data.load_cnamuangtoun(base0) + data.load_netsol() + data.load_screening()
     groups = {p.id: p.group for p in allp}
     texts = {p.id: (p.resume, p.jd) for p in allp}
     tables = {ds: load_table(ds, groups, texts) for ds in DATASETS

@@ -398,6 +398,26 @@ P5 Requirement-by-requirement matching.
   moved to scripts/ and CI now runs the secret scan and v2 tests only.
   Limits: small subsets, one dataset for edits, one seed, local llama3.1.
 
+9.6 A fourth dataset: AzharAli05/Resume-Screening-Dataset (negative control)
+  10,174 LLM-written resumes, one-line JDs (~19 words), select/reject
+  labels. Run on 300 JDs (804 pairs), same code and scorers as above.
+  Result: EVERYTHING is at chance. Good-vs-No AUC: baseline 0.51, TF-IDF
+  0.47, raw bge cosine 0.51, dense 0.51, our recommended set 0.47 (CI spans 0.5). The
+  fixes neither help nor hurt here, and no method, including the simple
+  baselines, beats a coin flip. The stated reasons for rejection
+  ("lacked leadership skills") are not recoverable from resume/JD text,
+  so this dataset cannot measure scoring accuracy; it is a useful check
+  that the scorer does not invent signal.
+  Finding that DID change the code: the validity guard refused all 116
+  of 804 pairs (14%) whose JD was under 15 words, scoring them 0. Short
+  one-line postings are legitimate, so the minimum was lowered from 15 to
+  8 words (improved.MIN_WORDS); rejected pairs on this dataset: 116 -> 0.
+  The netsol rejections (107) are unaffected. Caveat: this threshold was
+  again set after seeing the data it is evaluated on.
+  Datasets considered and skipped: nonameee12233/job-resume-matching
+  (labels computed from embeddings, circular with our dense channel),
+  SantoshDN/ai-resume-screening-dataset (structured fields, no JD text).
+
 ---------------------------------------------------------------------
 10. SUGGESTED NEXT STEPS
 ---------------------------------------------------------------------

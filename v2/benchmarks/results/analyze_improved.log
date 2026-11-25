@@ -1,0 +1,51 @@
+Fetching 1031 files:   0%|          | 0/1031 [00:00<?, ?it/s]Fetching 1031 files:  73%|███████▎  | 754/1031 [00:00<00:00, 7526.84it/s]Fetching 1031 files: 100%|██████████| 1031/1031 [00:00<00:00, 7932.00it/s]
+fitted weights (on 0xnbk): {'dense': 0.813076640153541, 'lexical': 0.1085868965119636, 'skills': 0.07833646333449552}
+calibration: test MAE 20.18 vs train-mean 22.33 (label points)
+
+== 0xnbk  n=1385 stuffed_pairs=3 rejected_invalid=1 llm_skill_cov=1.00
+  V0 baseline (3-ch, shortcut skills)    spear=0.149 aucGN=0.622 aucGP=0.564 aucPN=0.565 perJD=0.782
+  V1 +P1 LLM skills                      spear=0.257 aucGN=0.726 aucGP=0.604 aucPN=0.622 perJD=0.797
+  V4 +P4 validity + capped BM25          spear=0.150 aucGN=0.623 aucGP=0.565 aucPN=0.565 perJD=0.776
+  V6 recommended (P1+P3+P4, default weights) spear=0.258 aucGN=0.727 aucGP=0.606 aucPN=0.622 perJD=0.79
+  V7 recommended (fitted weights)        spear=0.242 aucGN=0.719 aucGP=0.631 aucPN=0.609 perJD=0.761
+  ch: capped BM25                        spear=0.137 aucGN=0.645 aucGP=0.613 aucPN=0.536 perJD=0.726
+  ch: LLM skills                         spear=0.171 aucGN=0.616 aucGP=0.522 aucPN=0.577 perJD=0.66
+  ch: dense (mean)                       spear=0.229 aucGN=0.709 aucGP=0.637 aucPN=0.601 perJD=0.759
+  ch: old BM25                           spear=0.137 aucGN=0.642 aucGP=0.603 aucPN=0.541 perJD=0.703
+  ch: old skills                         spear=0.082 aucGN=0.565 aucGP=0.513 aucPN=0.545 perJD=0.691
+
+== cnamuangtoun  n=1302 stuffed_pairs=3 rejected_invalid=0 llm_skill_cov=0.71
+  V0 baseline (3-ch, shortcut skills)    spear=  -   aucGN=0.563 aucGP=0.454 aucPN=0.607 perJD=0.791
+  V1 +P1 LLM skills                      spear=  -   aucGN=0.694 aucGP=0.583 aucPN=0.634 perJD=0.818
+  V4 +P4 validity + capped BM25          spear=  -   aucGN=0.567 aucGP=0.457 aucPN=0.606 perJD=0.801
+  V6 recommended (P1+P3+P4, default weights) spear=  -   aucGN=0.694 aucGP=0.587 aucPN=0.632 perJD=0.825
+  V7 recommended (fitted weights)        spear=  -   aucGN=0.708 aucGP=0.560 aucPN=0.661 perJD=0.79
+  ch: capped BM25                        spear=  -   aucGN=0.634 aucGP=0.602 aucPN=0.544 perJD=0.681
+  ch: LLM skills                         spear=  -   aucGN=0.643 aucGP=0.530 aucPN=0.617 perJD=0.77
+  ch: dense (mean)                       spear=  -   aucGN=0.666 aucGP=0.491 aucPN=0.669 perJD=0.785
+  ch: old BM25                           spear=  -   aucGN=0.629 aucGP=0.577 aucPN=0.556 perJD=0.647
+  ch: old skills                         spear=  -   aucGN=0.582 aucGP=0.488 aucPN=0.581 perJD=0.686
+
+== netsol  n=875 stuffed_pairs=68 rejected_invalid=107 llm_skill_cov=0.99
+  V0 baseline (3-ch, shortcut skills)    spear=0.351 aucGN=0.187 aucGP=0.582 aucPN=0.168 perJD=0.254
+  V1 +P1 LLM skills                      spear=0.400 aucGN=0.181 aucGP=0.617 aucPN=0.167 perJD=0.255
+  V4 +P4 validity + capped BM25          spear=0.347 aucGN=0.896 aucGP=0.581 aucPN=0.872 perJD=0.986
+  V6 recommended (P1+P3+P4, default weights) spear=0.395 aucGN=0.895 aucGP=0.616 aucPN=0.876 perJD=0.986
+  V7 recommended (fitted weights)        spear=0.460 aucGN=0.910 aucGP=0.701 aucPN=0.889 perJD=0.986
+  ch: capped BM25                        spear=0.411 aucGN=0.193 aucGP=0.626 aucPN=0.187 perJD=0.245
+  ch: LLM skills                         spear=0.154 aucGN=0.119 aucGP=0.472 aucPN=0.122 perJD=0.208
+  ch: dense (mean)                       spear=0.438 aucGN=0.211 aucGP=0.715 aucPN=0.211 perJD=0.258
+  ch: old BM25                           spear=0.460 aucGN=0.194 aucGP=0.630 aucPN=0.188 perJD=0.244
+  ch: old skills                         spear=0.130 aucGN=0.158 aucGP=0.459 aucPN=0.202 perJD=0.226
+
+== screening  n=804 stuffed_pairs=40 rejected_invalid=0 llm_skill_cov=0.69
+  V0 baseline (3-ch, shortcut skills)    spear=  -   aucGN=0.508 aucGP=  -   aucPN=  -   perJD=0.533
+  V1 +P1 LLM skills                      spear=  -   aucGN=0.470 aucGP=  -   aucPN=  -   perJD=0.513
+  V4 +P4 validity + capped BM25          spear=  -   aucGN=0.513 aucGP=  -   aucPN=  -   perJD=0.521
+  V6 recommended (P1+P3+P4, default weights) spear=  -   aucGN=0.473 aucGP=  -   aucPN=  -   perJD=0.503
+  V7 recommended (fitted weights)        spear=  -   aucGN=0.491 aucGP=  -   aucPN=  -   perJD=0.511
+  ch: capped BM25                        spear=  -   aucGN=0.489 aucGP=  -   aucPN=  -   perJD=0.508
+  ch: dense (mean)                       spear=  -   aucGN=0.509 aucGP=  -   aucPN=  -   perJD=0.51
+  ch: old BM25                           spear=  -   aucGN=0.475 aucGP=  -   aucPN=  -   perJD=0.509
+  ch: LLM skills                         spear=  -   aucGN=0.455 aucGP=  -   aucPN=  -   perJD=0.495
+  ch: old skills                         spear=  -   aucGN=0.487 aucGP=  -   aucPN=  -   perJD=0.608

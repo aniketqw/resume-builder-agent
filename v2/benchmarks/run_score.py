@@ -116,7 +116,8 @@ def evaluate(rows: list[dict]) -> dict:
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dataset", default="0xnbk",
-                    choices=["0xnbk", "cnamuangtoun", "netsol", "all"])
+                    choices=["0xnbk", "cnamuangtoun", "netsol", "screening", "all"])
+    ap.add_argument("--n-jds", type=int, default=None, help="keep all pairs of this many JDs")
     ap.add_argument("--n", type=int, default=None, help="stratified subsample size")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--no-baselines", action="store_true")
@@ -124,10 +125,13 @@ def main(argv=None) -> None:
 
     base = data.load_0xnbk() if args.dataset in ("0xnbk", "cnamuangtoun", "all") else []
     loaders = {"0xnbk": lambda: base, "cnamuangtoun": lambda: data.load_cnamuangtoun(base),
-               "netsol": data.load_netsol}
+               "netsol": data.load_netsol, "screening": data.load_screening}
     names = ["0xnbk", "cnamuangtoun", "netsol"] if args.dataset == "all" else [args.dataset]
     for name in names:
-        pairs = data.subsample(loaders[name](), args.n, args.seed)
+        pairs = loaders[name]()
+        if args.n_jds:
+            pairs = data.jd_subset(pairs, args.n_jds)
+        pairs = data.subsample(pairs, args.n, args.seed)
         print(f"== {name}: scoring {len(pairs)} pairs", flush=True)
         rows = score_pairs(pairs, baselines=not args.no_baselines)
         write_csv(rows, RESULTS / f"scores_{name}.csv")

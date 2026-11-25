@@ -1,0 +1,10 @@
+screening: 804 pairs over 300 JDs
+  100/804  119.7 pairs/s
+  200/804  214.5 pairs/s
+  300/804  294.3 pairs/s
+  400/804  362.2 pairs/s
+  500/804  419.8 pairs/s
+  600/804  469.2 pairs/s
+  700/804  512.6 pairs/s
+  800/804  537.0 pairs/s
+done

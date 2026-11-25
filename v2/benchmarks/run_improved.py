@@ -28,6 +28,8 @@ def load(dataset: str, n_jds: int):
         pairs = data.load_0xnbk()
     elif dataset == "cnamuangtoun":
         pairs = data.load_cnamuangtoun()
+    elif dataset == "screening":
+        pairs = data.load_screening()
     else:
         pairs = data.load_netsol()
     return data.jd_subset(pairs, n_jds)
@@ -35,7 +37,7 @@ def load(dataset: str, n_jds: int):
 
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dataset", required=True, choices=["0xnbk", "cnamuangtoun", "netsol"])
+    ap.add_argument("--dataset", required=True, choices=["0xnbk", "cnamuangtoun", "netsol", "screening"])
     ap.add_argument("--n-jds", type=int, default=60)
     args = ap.parse_args(argv)
     pairs = load(args.dataset, args.n_jds)

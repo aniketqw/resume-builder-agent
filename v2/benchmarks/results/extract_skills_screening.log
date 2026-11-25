@@ -1,0 +1,33 @@
+Fetching 1031 files:   0%|          | 0/1031 [00:00<?, ?it/s]Fetching 1031 files:  65%|██████▍   | 668/1031 [00:00<00:00, 6676.98it/s]Fetching 1031 files: 100%|██████████| 1031/1031 [00:00<00:00, 7042.40it/s]
+300 unique JDs to extract; cache /Users/aniketsaxena/Documents/p/from_aug_1/p2/resume-builder-agent/.claude/worktrees/ats-resume-job-benchmarks-ea8d96/v2/benchmarks/results/jd_skills_cache.json
+  10/300 failed=0 25s
+  20/300 failed=0 46s
+  30/300 failed=0 66s
+  40/300 failed=0 83s
+  50/300 failed=0 103s
+  60/300 failed=0 118s
+  70/300 failed=0 151s
+  80/300 failed=0 160s
+  90/300 failed=0 172s
+  100/300 failed=0 190s
+  110/300 failed=0 316s
+  120/300 failed=0 330s
+  130/300 failed=0 349s
+  140/300 failed=0 371s
+  150/300 failed=0 395s
+  160/300 failed=0 409s
+  170/300 failed=0 429s
+  180/300 failed=0 440s
+  190/300 failed=0 453s
+  200/300 failed=0 466s
+  210/300 failed=0 477s
+  220/300 failed=0 488s
+  230/300 failed=0 501s
+  240/300 failed=0 514s
+  250/300 failed=0 524s
+  260/300 failed=0 534s
+  270/300 failed=0 578s
+  280/300 failed=0 631s
+  290/300 failed=0 682s
+  300/300 failed=0 740s
+done: 300 JDs, 0 failed, 740s

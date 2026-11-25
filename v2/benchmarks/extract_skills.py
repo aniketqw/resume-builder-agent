@@ -21,11 +21,13 @@ def main(argv=None) -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--n-jds", type=int, default=60)
     ap.add_argument("--workers", type=int, default=2)
+    ap.add_argument("--only", default="", help="comma list of datasets (default all)")
     args = ap.parse_args(argv)
     base = data.load_0xnbk()
-    pairs = base + data.load_cnamuangtoun(base) + data.load_netsol()
+    pairs = base + data.load_cnamuangtoun(base) + data.load_netsol() + data.load_screening()
     jds: dict[str, str] = {}
-    for ds in ("0xnbk", "cnamuangtoun", "netsol"):
+    chosen = [d for d in args.only.split(",") if d] or ["0xnbk", "cnamuangtoun", "netsol", "screening"]
+    for ds in chosen:
         sub = data.jd_subset([p for p in pairs if p.dataset == ds], args.n_jds)
         for p in sub:
             jds.setdefault(p.group, p.jd)

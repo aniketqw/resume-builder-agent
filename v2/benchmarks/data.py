@@ -14,6 +14,7 @@ Dataset quirks that matter (found by inspecting them, not assumed):
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -102,6 +103,24 @@ def load_netsol() -> list[Pair]:
                           resume=resume.strip(), jd=jd.strip(), tier=tier,
                           score=float(macro) if macro is not None else None,
                           group=_jd_key(jd)))
+    return pairs
+
+
+def load_screening() -> list[Pair]:
+    """AzharAli05/Resume-Screening-Dataset: 10,174 LLM-written resumes with a
+    one-line JD and a select/reject decision. Two tiers only (reject 0,
+    select 2). The decision's free-text reason is not used."""
+    from datasets import load_dataset
+    ds = load_dataset("AzharAli05/Resume-Screening-Dataset", split="train")
+    pairs: list[Pair] = []
+    for i, r in enumerate(ds):
+        resume = re.sub(r"^Here'?s[^\n]*\n", "", (r["Resume"] or "").strip()).strip()
+        jd = (r["Job_Description"] or "").strip()
+        tier = {"select": 2, "reject": 0}.get((r["Decision"] or "").strip().lower())
+        if tier is None or not resume or not jd:
+            continue
+        pairs.append(Pair(id=f"screen-{i}", dataset="screening", resume=resume, jd=jd,
+                          tier=tier, group=_jd_key(jd)))
     return pairs
 
 

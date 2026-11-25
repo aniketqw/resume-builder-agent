@@ -87,6 +87,9 @@ class ImprovedScore:
 # ("flibberwock snazzled") fragment into 3+. Threshold chosen on the netsol
 # invalid-vs-valid split (see benchmarks/RESULTS notes), not guessed.
 MAX_PIECES_PER_WORD = 2.2
+# Shorter than this there is nothing to match. Was 15; the screening dataset's
+# one-line job descriptions (~19 words, 14% under 15) were all wrongly refused.
+MIN_WORDS = 8
 
 
 def pieces_per_word(text: str, sample_words: int = 150) -> float | None:
@@ -111,7 +114,7 @@ def check_valid(resume_text: str, jd_text: str) -> tuple[bool, str]:
         ratio = pieces_per_word(text)
         if ratio is not None and ratio > MAX_PIECES_PER_WORD:
             return False, f"{label} does not look like natural language"
-        if len(text.split()) < 15:
+        if len(text.split()) < MIN_WORDS:
             return False, f"{label} is too short to score"
     return True, ""
 
